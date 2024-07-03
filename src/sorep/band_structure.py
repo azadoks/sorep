@@ -5,9 +5,13 @@ from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
+from numpy import ma
+
 
 from .dos import smeared_dos
 from .smearing import smearing_from_name
+
+__all__ = ('BandStructure',)
 
 # TODO: clarify weights and occupations w.r.t. number of spins in the documentation
 # TODO: clarify units of the k-points in the documentation
@@ -139,7 +143,7 @@ class BandStructure:
             )
         smearing = smearing_from_name(smearing_type)(center=fermi_energy,
                                                      width=smearing_width)
-        return self.max_occupation * smearing(self.bands)
+        return self.max_occupation * smearing.occupation(self.bands)
 
     def compute_smeared_dos(self, energies: npt.NDArray,
                             smearing_type: ty.Union[str, int],
@@ -170,7 +174,10 @@ class BandStructure:
             return None
 
         # Flatten the spin axis so that each row ia a band
-        bands = self.bands.squeeze(0)
+        # First reorder the axes to (n_spins, n_bands, n_kpoints)
+        # Then reshape the array to (n_spins * n_bands, n_kpoints)
+        # The first n_bands rows of the resulting array correspond to spin 0, and the rest to spin 1
+        bands = np.transpose(self.bands, (0, 2, 1)).reshape((self.n_spins * self.n_bands, self.n_kpoints))
 
         return bool(
             np.any(
@@ -190,3 +197,28 @@ class BandStructure:
         if is_metallic is None:
             return None
         return not is_metallic
+
+    @property
+    def vbm(self) -> float:
+        """The valence band maximum.
+
+        Returns:
+            float: valence band maximum.
+        """
+        if self.fermi_energy is None:
+            return None
+        # Mask the conduction bands and find the maximum of the rest of the bands,
+        # i.e. the valence bands
+        return np.max(ma.array(self.bands, mask=self.bands > self.fermi_energy))
+
+    @property
+    def cbm(self) -> float:
+        """The conduction band minimum.
+
+        Returns:
+            float: conduction band minimum.
+        """
+        if self.fermi_energy is None:
+            return None
+        # See `vbm`
+        return np.min(ma.array(self.bands, mask=self.bands < self.fermi_energy))

@@ -33,13 +33,21 @@ class Smearing(ABC):
     def occupation_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
         """Compute the derivative of the occupation function (probability density function)."""
 
+    @abstractmethod
+    def occupation_curvature(self, bands: npt.ArrayLike) -> npt.ArrayLike:
+        """Compute the second derivative (curvature) of the occupation function."""
+
 
 class Delta(Smearing):
     """No smearing, i.e. a true step/delta function."""
-    def occupation(self, bands: np.array) -> np.array:
+    def occupation(self, bands: npt.ArrayLike) -> npt.ArrayLike:
         return np.where(bands < self.center, 1.0, 0.0)
 
-    def occupation_derivative(self, bands: np.array) -> np.array:
+    def occupation_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
+        return np.where(bands == self.center, -np.inf, 0.0)
+
+    # TODO: check correctness!
+    def occupation_curvature(self, bands: npt.ArrayLike) -> npt.ArrayLike:
         return np.where(bands == self.center, -np.inf, 0.0)
 
 
@@ -54,6 +62,16 @@ class Gaussian(Smearing):
             x > MAX_EXP_ARG,
             1.0 / np.sqrt(np.pi) * np.exp(-MAX_EXP_ARG),
             1.0 / np.sqrt(np.pi) * np.exp(-x),
+        )
+
+    # TODO: check correctness!
+    def occupation_curvature(self, bands: npt.ArrayLike) -> npt.ArrayLike:
+        x = self._scale(bands)
+        z = self._scale(bands)**2
+        return np.where(
+            z > MAX_EXP_ARG,
+            -2.0 * x / np.sqrt(np.pi) * np.exp(-MAX_EXP_ARG),
+            -2.0 * x / np.sqrt(np.pi) * np.exp(-z),
         )
 
 
@@ -79,19 +97,34 @@ class FermiDirac(Smearing):
             1.0 / (2 + np.exp(-x) + np.exp(x))
         )
 
+    # TODO: check correctness!
+    def occupation_curvature(self, bands: npt.ArrayLike) -> npt.ArrayLike:
+        x = self._scale(bands)
+        return np.where(
+            np.abs(x) > MAX_EXP_ARG,
+            0.0,
+            -(np.exp(x) - np.exp(-x)) / (2.0 + np.exp(-x) + np.exp(x))**2
+        )
+
 
 class Cold(Smearing):
     """Marzari-Vanderbilt-DeVita-Payne (cold) smearing."""
 
     def occupation(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands)
-        return 0.5 * sp.special.erf(x - 1.0 / np.sqrt(2.0)) + 1 / np.sqrt(
-            2.0 * np.pi) * np.exp(-(x - 1.0 / np.sqrt(2.0))**2) + 0.5
+        x = self._scale(bands) - 1.0 / np.sqrt(2.0)
+        z = np.minimum(x**2, MAX_EXP_ARG)
+        return 0.5 * sp.special.erf(x) + 1 / np.sqrt(2.0 * np.pi) * np.exp(-z) + 0.5
 
     def occupation_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(bands) - 1.0 / np.sqrt(2.0)
         z = np.minimum(x**2, MAX_EXP_ARG)
         return 1 / (2 * np.sqrt(np.pi)) * np.exp(-z) * (2.0 - np.sqrt(2.0) * x)
+
+    # TODO: check correctness!
+    def occupation_curvature(self, bands: npt.ArrayLike) -> npt.ArrayLike:
+        x = self._scale(bands)
+        z = np.minimum((x - 1.0 / np.sqrt(2.0))**2, MAX_EXP_ARG)
+        return 1 / (2 * np.sqrt(np.pi)) * np.exp(-z) * (2.0 * np.sqrt(2.0) * x**2 - 6.0 * x + np.sqrt(2.0))
 
 
 def smearing_from_name(name: ty.Optional[ty.Union[str,int]]) -> Smearing:
