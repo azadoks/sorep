@@ -21,6 +21,7 @@ scipy = "^1.14.0"
 ase = "^3.23.0"
 scikit-learn = "^1.5.1"
 imbalanced-learn = "^0.12.3"
+jax = "^0.4.30"
 
 [tool.poetry.group.dev.dependencies]
 matplotlib = "^3.9.0"
@@ -32,6 +33,7 @@ myst-parser = "^3.0.1"
 pre-commit = "^3.7.1"
 pylint = "^3.2.5"
 black = "^24.4.2"
+importlib-resources = "^6.4.0"
 
 [tool.isort]
 profile = "black"

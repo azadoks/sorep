@@ -2,7 +2,8 @@
 
 import typing as ty
 
-import numpy as np
+# import numpy as np
+import jax.numpy as np
 import numpy.typing as npt
 import scipy as sp
 
@@ -18,8 +19,29 @@ __all__ = (
     "compute_occupations_2nd_derivative",
     "compute_n_electrons",
     "compute_n_electrons_derivative",
-    "compute_n_electrons_curvature",
+    "compute_n_electrons_2nd_derivative",
 )
+
+
+def get_max_occupation(n_spins: int) -> float:
+    """Get the maximum occupation for a given number of spin channels.
+
+    Args:
+        n_spins (int): number of spin channels.
+
+    Raises:
+        ValueError: if the maximum occupation is unknown for the given number of spin channels.
+
+    Returns:
+        float: maximum occupation.
+    """
+    if n_spins == 1:
+        max_occupation = 2.0
+    elif n_spins == 2:
+        max_occupation = 1.0
+    else:
+        raise ValueError(f"Unknown maximum occupation for n_spins={n_spins}")
+    return max_occupation
 
 
 def compute_occupations(
@@ -42,8 +64,9 @@ def compute_occupations(
     Returns:
         npt.NDArray[np.float64]: (n_spins, n_kpoints, n_bands) occupations array.
     """
+    max_occs = get_max_occupation(bands.shape[0])
     smearing = smearing_from_name(smearing_type)(center=fermi_energy, width=smearing_width)
-    return smearing.occupation(bands)
+    return max_occs * smearing.occupation(bands)
 
 
 #! This may not be correct, should be checked
@@ -64,8 +87,9 @@ def compute_occupations_derivative(
     Returns:
         npt.NDArray[np.float64]: (n_spins, n_kpoints, n_bands) occupations derivative array.
     """
+    max_occs = get_max_occupation(bands.shape[0])
     smearing = smearing_from_name(smearing_type)(center=fermi_energy, width=smearing_width)
-    return 1 / smearing_width * smearing.occupation_derivative(bands)
+    return max_occs / smearing_width * smearing.occupation_derivative(bands)
 
 
 #! This may not be correct, should be checked
@@ -86,8 +110,9 @@ def compute_occupations_2nd_derivative(
     Returns:
         npt.NDArray[np.float64]: (n_spins, n_kpoints, n_bands) occupations derivative array.
     """
+    max_occs = get_max_occupation(bands.shape[0])
     smearing = smearing_from_name(smearing_type)(center=fermi_energy, width=smearing_width)
-    return 1 / smearing_width**2 * smearing.occupation_2nd_derivative(bands)
+    return max_occs / smearing_width**2 * smearing.occupation_2nd_derivative(bands)
 
 
 def compute_n_electrons(
@@ -139,7 +164,7 @@ def compute_n_electrons_derivative(
     return np.einsum("skn,k->skn", occupations_derivative, weights).sum()
 
 
-def compute_n_electrons_curvature(
+def compute_n_electrons_2nd_derivative(
     bands: npt.NDArray[np.float64],
     weights: npt.NDArray[np.float64],
     fermi_energy: float,
@@ -310,7 +335,7 @@ def find_fermi_energy_two_stage(  # pylint: disable=too-many-arguments
     def objective_2nd_deriv(ef):
         ne = compute_n_electrons(bands, weights, ef, smearing_type, smearing_width)
         dne = compute_n_electrons_derivative(bands, weights, ef, smearing_type, smearing_width)
-        ddne = compute_n_electrons_curvature(bands, weights, ef, smearing_type, smearing_width)
+        ddne = compute_n_electrons_2nd_derivative(bands, weights, ef, smearing_type, smearing_width)
         return 2 * ((ne - n_electrons) * ddne + dne**2)
 
     try:

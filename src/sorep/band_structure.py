@@ -4,7 +4,8 @@ import json
 import os
 import typing as ty
 
-import numpy as np
+# import numpy as np
+import jax.numpy as np
 from numpy import ma
 import numpy.typing as npt
 
@@ -43,23 +44,33 @@ class BandStructure:
             fermi_energy (ty.Optional[float], optional): Fermi energy. Defaults to None.
             n_electrons (ty.Optional[int], optional): number of electrons. Defaults to None.
         """
-        # Check that the bands are the expected shape
+        # Check all the shapes
         assert bands.ndim == 3
+        assert kpoints.ndim == 2
+        assert kpoints.shape[1] == 3
+        assert weights.ndim == 1
+        assert kpoints.shape[0] == weights.shape[0] == bands.shape[1]
         if occupations is not None:
             assert occupations.ndim == 3
             assert occupations.shape == bands.shape
-        # Check that the vectors are vectors
-        assert kpoints.ndim == weights.ndim == 1
-        # Check that the k-points are 3D
-        assert kpoints.shape[1] == 3
-        # Check that the k-points shape is consistent
-        assert kpoints.shape == weights.shape == bands.shape[1:2]
+        if labels is not None:
+            assert labels.ndim == 1
+        if label_numbers is not None:
+            assert label_numbers.ndim == 1
+        if labels is not None and label_numbers is not None:
+            assert labels.shape == label_numbers.shape
         # Check that the Fermi energy makes sense
         if fermi_energy is not None:
             assert np.min(bands) <= fermi_energy <= np.max(bands)
         # Check that the number of electrons makes sense
         if n_electrons is not None:
             assert n_electrons >= 0
+
+        # Normalize the sum of the k-weights to 1
+        total_weight = weights.sum()
+        if not np.isclose(total_weight, 1) or np.isclose(total_weight, 2):
+            raise ValueError(f"Total weight is {total_weight}, is expected to be 1 or 2.")
+        weights /= total_weight
 
         self.bands = bands
         self.kpoints = kpoints

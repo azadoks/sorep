@@ -2,7 +2,8 @@
 
 import typing as ty
 
-import numpy as np
+# import numpy as np
+import jax.numpy as np
 import numpy.typing as npt
 
 from .smearing import smearing_from_name

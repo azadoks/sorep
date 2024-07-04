@@ -3,9 +3,12 @@
 from abc import ABC, abstractmethod
 import typing as ty
 
-import numpy as np
+# import numpy as np
+import jax.numpy as np
+import jax.scipy as sp
 import numpy.typing as npt
-import scipy as sp
+
+# import scipy as sp
 
 __all__ = (
     "Smearing",
@@ -129,7 +132,7 @@ def smearing_from_name(name: ty.Optional[ty.Union[str, int]]) -> Smearing:
 
     Supported names are:
 
-        * NoSmearing: None
+        * Delta: None, 'fixed'
         * GaussianSmearing: 'gauss', 'gaussian', '0', 0
         * FermiDiracSmearing: 'fd', 'f-d', 'fermi-dirac', '-99', -99
         * ColdSmearing: 'mv', 'm-v', 'marzari-vanderbilt', 'cold', '-1', -1
@@ -143,9 +146,12 @@ def smearing_from_name(name: ty.Optional[ty.Union[str, int]]) -> Smearing:
     Returns:
         Smearing: smearing class.
     """
-    if name is None:
+    if isinstance(name, int):
+        name = str(name)
+    if isinstance(name, str):
+        name = name.lower()
+    if name is None or name == "fixed":
         smearing = Delta
-    name = str(name).lower()
     if name in ("mv", "m-v", "marzari-vanderbilt", "cold", "-1"):
         smearing = Cold
     elif name in ("gauss", "gaussian", "0"):
