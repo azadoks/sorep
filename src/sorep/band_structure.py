@@ -68,7 +68,7 @@ class BandStructure:
 
         # Normalize the sum of the k-weights to 1
         total_weight = weights.sum()
-        if not np.isclose(total_weight, 1) or np.isclose(total_weight, 2):
+        if not (np.isclose(total_weight, 1, atol=1e-8) or np.isclose(total_weight, 2, atol=1e-8)):
             raise ValueError(f"Total weight is {total_weight}, is expected to be 1 or 2.")
         weights /= total_weight
 
