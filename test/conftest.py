@@ -4,34 +4,22 @@ from importlib.resources import files
 import json
 import test.resources  # pylint: disable=import-error
 
-import numpy as np
+import jax
 import pytest
+
+import sorep
+
+jax.config.update("jax_enable_x64", True)
 
 
 @pytest.fixture(scope="module", params=["one_spin_insulator", "two_spin_insulator", "one_spin_metal", "two_spin_metal"])
-def bands_data(request):
+def bandstructure(request):
     """Load band structure data from test resources."""
     dir_ = files(test.resources).joinpath(request.param)  # pylint: disable=no-member
-
-    with open(dir_.joinpath("bands.npz"), "rb") as fp:
-        arrays = dict(np.load(fp))
-    with open(dir_.joinpath("metadata.json"), encoding="utf-8") as fp:
-        metadata = json.load(fp)
-
-    bands = arrays["bands"]
-    if bands.ndim == 2:
-        bands = np.expand_dims(bands, 0)
-
-    weights = arrays["weights"]
-    weights /= weights.sum()
-
-    return {
-        "bands": bands,
-        "kpoints": arrays["kpoints"],
-        "weights": weights,
-        "occupations": arrays["occupations"],
-        "fermi_energy": metadata["fermi_energy"],
-        "n_electrons": metadata["number_of_electrons"],
-        "smearing_type": metadata["smearing_type"],
-        "smearing_width": metadata["degauss"],
-    }
+    with open(dir_.joinpath("metadata.json"), "r", encoding="utf-8") as file:
+        metadata = json.load(file)
+    return (
+        sorep.BandStructure.from_npz_metadata(dir_.joinpath("bands.npz"), dir_.joinpath("metadata.json")),
+        metadata["smearing_type"],
+        metadata["degauss"],
+    )

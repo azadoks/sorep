@@ -69,7 +69,6 @@ def compute_occupations(
     return max_occs * smearing.occupation(bands)
 
 
-#! This may not be correct, should be checked
 def compute_occupations_derivative(
     bands: npt.NDArray[np.float64],
     fermi_energy: float,
@@ -92,7 +91,6 @@ def compute_occupations_derivative(
     return max_occs / smearing_width * smearing.occupation_derivative(bands)
 
 
-#! This may not be correct, should be checked
 def compute_occupations_2nd_derivative(
     bands: npt.NDArray[np.float64],
     fermi_energy: float,
@@ -187,12 +185,13 @@ def compute_n_electrons_2nd_derivative(
     return np.einsum("skn,k->skn", occupations_curvature, weights).sum()
 
 
-def find_fermi_energy(
+def find_fermi_energy(  # pylint: disable=too-many-arguments
     bands: npt.NDArray[np.float64],
     weights: npt.NDArray[np.float64],
     smearing_type: ty.Union[str, int],
     smearing_width: float,
     n_electrons: int,
+    n_electrons_tol: float = 1e-6,
 ) -> float:
     """Find the Fermi level by bisection, two-stage algorithm, or at zero temperature depending on the smearing type.
 
@@ -213,9 +212,13 @@ def find_fermi_energy(
     if smearing_cls is Delta:
         fermi_energy = find_fermi_energy_zero_temp(bands, weights, n_electrons)
     elif smearing_cls in (Gaussian, FermiDirac):
-        fermi_energy = find_fermi_energy_bisection(bands, weights, smearing_type, smearing_width, n_electrons)
+        fermi_energy = find_fermi_energy_bisection(
+            bands, weights, smearing_type, smearing_width, n_electrons, n_electrons_tol
+        )
     elif smearing_cls is Cold:
-        fermi_energy = find_fermi_energy_two_stage(bands, weights, smearing_type, smearing_width, n_electrons)
+        fermi_energy = find_fermi_energy_two_stage(
+            bands, weights, smearing_type, smearing_width, n_electrons, n_electrons_tol
+        )
     else:
         raise ValueError(f"Unknown smearing class: {smearing_cls}")
     return fermi_energy
@@ -282,7 +285,7 @@ def find_fermi_energy_bisection(  # pylint: disable=too-many-arguments
     e_max = bands.max() + 10 * smearing_width
 
     fermi_energy = sp.optimize.bisect(objective, e_min, e_max)
-    if np.abs(objective(fermi_energy) - n_electrons) > n_electrons_tol:
+    if np.abs(objective(fermi_energy)) > n_electrons_tol:
         raise RuntimeError(f"Failed to find Fermi energy with bisection: {fermi_energy}")
 
     return fermi_energy
@@ -294,7 +297,6 @@ def find_fermi_energy_two_stage(  # pylint: disable=too-many-arguments
     smearing_type: ty.Union[str, int],
     smearing_width: float,
     n_electrons: int,
-    return_all: bool = False,
     n_electrons_tol: float = 1e-6,
     newton_kwargs: ty.Optional[ty.Dict[str, ty.Any]] = None,
 ) -> float:
@@ -314,11 +316,10 @@ def find_fermi_energy_two_stage(  # pylint: disable=too-many-arguments
         float: Fermi energy.
     """
     # Start with bisection and Gaussian smearing
-    bisection_fermi = find_fermi_energy_bisection(bands, weights, "gauss", smearing_width, n_electrons, n_electrons_tol)
+    bisection_fermi = find_fermi_energy_bisection(bands, weights, "gauss", smearing_width, n_electrons, np.inf)
 
     # Refine with Newton and the requested smearing (probably cold)
-    newton_fermi = bisection_fermi
-    newton_refined = True
+    two_stage_fermi = bisection_fermi
 
     # Objective function: f(eF) = (total_occupation(eF) - n_electrons)^2
     def objective(ef):
@@ -344,13 +345,9 @@ def find_fermi_energy_two_stage(  # pylint: disable=too-many-arguments
         newton_fermi = sp.optimize.newton(
             func=objective, fprime=objective_deriv, fprime2=objective_2nd_deriv, x0=bisection_fermi, **newton_kwargs
         )
+        if np.abs(objective(newton_fermi)) <= n_electrons_tol:
+            two_stage_fermi = newton_fermi
     except RuntimeError:
-        newton_refined = False
+        pass
 
-    if np.abs(objective(newton_fermi) - n_electrons) > n_electrons_tol:
-        newton_refined = False
-        newton_fermi = bisection_fermi
-
-    if return_all:
-        return newton_fermi, newton_refined, bisection_fermi
-    return newton_fermi
+    return two_stage_fermi

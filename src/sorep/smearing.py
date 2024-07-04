@@ -98,17 +98,17 @@ class Cold(Smearing):
     """Marzari-Vanderbilt-DeVita-Payne (cold) smearing."""
 
     def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
-        x = self._scale(x) + 1.0 / jnp.sqrt(2.0)
-        return -0.5 * jsp.special.erf(x) + 1 / jnp.sqrt(2.0 * jnp.pi) * jnp.exp(-(x**2)) + 0.5
+        z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
+        return -0.5 * jsp.special.erf(z) + 1 / jnp.sqrt(2.0 * jnp.pi) * jnp.exp(-(z**2)) + 0.5
 
     def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
-        x = self._scale(x) + 1.0 / jnp.sqrt(2.0)
-        dx = -jnp.exp(-(x**2)) * (jnp.sqrt(2) * x + 1) / jnp.sqrt(jnp.pi)
+        z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
+        dx = -jnp.exp(-(z**2)) * (jnp.sqrt(2) * z + 1) / jnp.sqrt(jnp.pi)
         return -dx
 
     def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
-        x = self._scale(x) + 1.0 / jnp.sqrt(2.0)
-        ddx = jnp.exp(-(x**2)) * (2.0 * jnp.sqrt(2.0) * x**2 + 2.0 * x - jnp.sqrt(2.0)) / jnp.sqrt(jnp.pi)
+        z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
+        ddx = jnp.exp(-(z**2)) * (2.0 * jnp.sqrt(2.0) * z**2 + 2.0 * z - jnp.sqrt(2.0)) / jnp.sqrt(jnp.pi)
         return -ddx
 
 

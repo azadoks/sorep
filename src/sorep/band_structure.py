@@ -6,7 +6,6 @@ import typing as ty
 
 # import numpy as np
 import jax.numpy as np
-from numpy import ma
 import numpy.typing as npt
 
 from .dos import smeared_dos
@@ -256,7 +255,7 @@ class BandStructure:
             return None
         # Mask the conduction bands and find the maximum of the rest of the bands,
         # i.e. the valence bands
-        return np.max(ma.array(self.bands, mask=self.bands > self.fermi_energy))
+        return np.max(self.bands[self.bands < self.fermi_energy])
 
     @property
     def cbm(self) -> float:
@@ -268,4 +267,4 @@ class BandStructure:
         if self.fermi_energy is None:
             return None
         # See `vbm`
-        return np.min(ma.array(self.bands, mask=self.bands < self.fermi_energy))
+        return np.min(self.bands[self.bands > self.fermi_energy])

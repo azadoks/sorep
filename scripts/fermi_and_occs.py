@@ -4,23 +4,24 @@ import pathlib as pl
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 import sorep
 
+jax.config.update('jax_enable_x64', True)
 # %%
-sm = sorep.smearing.Delta(0.0, 1.0)
+dirs = list(pl.Path('../data/mc3d/').glob('*/scf/*'))
+# %%
+%%time
+material = sorep.MaterialData.from_dir(pl.Path('../test/resources/one_spin_insulator/'))
 
-x = jnp.linspace(-10, 10, 1000)
-y = sm.occupation_derivative(x)
-
-fig, axes = plt.subplots(1, 3, figsize=(10, 3))
-
-axes[0].plot(x, sm.occupation(x))
-
-axes[1].plot(x, sm.occupation_derivative(x))
-axes[1].plot(x, -jax.vmap(jax.grad(sm.occupation))(x))
-
-axes[2].plot(x, sm.occupation_2nd_derivative(x))
-axes[2].plot(x, -jax.vmap(jax.hessian(sm.occupation))(x))
+sorep.fermi.find_fermi_energy(
+    material.bands.bands,
+    material.bands.weights,
+    material.metadata['smearing_type'],
+    material.metadata['degauss'],
+    material.bands.n_electrons,
+    n_electrons_tol=1e-4
+), material.bands.fermi_energy, material.bands.is_insulating(), material.bands.vbm, material.bands.cbm
 
 # %%
