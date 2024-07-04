@@ -1,6 +1,6 @@
-from . import smearing
-from . import dos
-from . import band_structure
-from . import fermi
+"""Spectral operator representations."""
 
-__all__ = ('smearing', 'dos', 'fermi',) + band_structure.__all__
+from . import band_structure, dos, fermi, smearing
+from .band_structure import BandStructure
+
+__all__ = ("smearing", "dos", "fermi", "BandStructure") + band_structure.__all__

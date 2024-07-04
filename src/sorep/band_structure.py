@@ -1,46 +1,88 @@
+"""Band structure data class and related functions."""
+
 import json
 import os
 import typing as ty
-from dataclasses import dataclass
 
 import numpy as np
-import numpy.typing as npt
 from numpy import ma
-
+import numpy.typing as npt
 
 from .dos import smeared_dos
 from .smearing import smearing_from_name
 
-__all__ = ('BandStructure',)
+__all__ = ()
 
-# TODO: clarify weights and occupations w.r.t. number of spins in the documentation
-# TODO: clarify units of the k-points in the documentation
 
-@dataclass
 class BandStructure:
-    """Data class containing band structure information."""
-    bands: npt.NDArray[np.float64]
-    kpoints: npt.NDArray[np.float64]
-    weights: npt.NDArray[np.float64]
-    occupations: ty.Optional[npt.NDArray[np.float64]] = None
-    labels: ty.Optional[npt.NDArray[np.float64]] = None
-    label_numbers: ty.Optional[npt.NDArray[np.float64]] = None
-    fermi_energy: ty.Optional[float] = None
-    n_electrons: ty.Optional[int] = None
+    # pylint: disable=too-many-instance-attributes
+    """Band structure data and useful operations."""
+
+    def __init__(  # pylint: disable=too-many-arguments
+        self,
+        bands: npt.NDArray[np.float64],
+        kpoints: npt.NDArray[np.float64],
+        weights: npt.NDArray[np.float64],
+        occupations: ty.Optional[npt.NDArray[np.float64]] = None,
+        labels: ty.Optional[npt.NDArray[np.float64]] = None,
+        label_numbers: ty.Optional[npt.NDArray[np.float64]] = None,
+        fermi_energy: ty.Optional[float] = None,
+        n_electrons: ty.Optional[int] = None,
+    ):
+        """Initialize a band structure.
+
+        Args:
+            bands (npt.NDArray[np.float64]): (n_spins, n_kpoints, n_bands) eigenvalues/bands.
+            kpoints (npt.NDArray[np.float64]): (n_kpoints, 3) k-points.
+            weights (npt.NDArray[np.float64]): (n_kpoints,) k-point weights.
+            occupations (ty.Optional[npt.NDArray[np.float64]], optional): (n_spins, n_kpoints, n_bands)
+                band occupations. Defaults to None.
+            labels (ty.Optional[npt.NDArray[np.float64]], optional): (n_labels,) k-point labels. Defaults to None.
+            label_numbers (ty.Optional[npt.NDArray[np.float64]], optional): (n_labels,) k-point label indices.
+                Defaults to None.
+            fermi_energy (ty.Optional[float], optional): Fermi energy. Defaults to None.
+            n_electrons (ty.Optional[int], optional): number of electrons. Defaults to None.
+        """
+        # Check that the bands are the expected shape
+        assert bands.ndim == 3
+        if occupations is not None:
+            assert occupations.ndim == 3
+            assert occupations.shape == bands.shape
+        # Check that the vectors are vectors
+        assert kpoints.ndim == weights.ndim == 1
+        # Check that the k-points are 3D
+        assert kpoints.shape[1] == 3
+        # Check that the k-points shape is consistent
+        assert kpoints.shape == weights.shape == bands.shape[1:2]
+        # Check that the Fermi energy makes sense
+        if fermi_energy is not None:
+            assert np.min(bands) <= fermi_energy <= np.max(bands)
+        # Check that the number of electrons makes sense
+        if n_electrons is not None:
+            assert n_electrons >= 0
+
+        self.bands = bands
+        self.kpoints = kpoints
+        self.weights = weights
+        self.occupations = occupations
+        self.labels = labels
+        self.label_numbers = label_numbers
+        self.fermi_energy = fermi_energy
+        self.n_electrons = n_electrons
 
     def __repr__(self) -> str:
-        return (f'{self.__class__.__name__}('
-                f'n_spins={self.n_spins}'
-                f', n_kpoints={self.n_kpoints}'
-                f', n_bands={self.n_bands}'
-                f', n_electrons={self.n_electrons}'
-                f', fermi_energy={self.fermi_energy}'
-                ')')
+        return (
+            f"{self.__class__.__name__}("
+            f"n_spins={self.n_spins}"
+            f", n_kpoints={self.n_kpoints}"
+            f", n_bands={self.n_bands}"
+            f", n_electrons={self.n_electrons}"
+            f", fermi_energy={self.fermi_energy}"
+            ")"
+        )
 
     @classmethod
-    def from_npz_metadata(cls,
-                          npz_path: os.PathLike,
-                          json_path: ty.Optional[os.PathLike] = None) -> None:
+    def from_npz_metadata(cls, npz_path: os.PathLike, json_path: ty.Optional[os.PathLike] = None) -> None:
         """Load a band structure from an NPZ file containing arrays and
         a JSON file containing metadata.
 
@@ -62,22 +104,21 @@ class BandStructure:
         # Load metadata (Fermi energy, number of electrons, etc.)
         metadata = {}
         if json_path:
-            with open(json_path, 'r', encoding='utf-8') as fp:
+            with open(json_path, "r", encoding="utf-8") as fp:
                 metadata = json.load(fp)
         # Load arrays (eigenvalues/bands, k-points, etc.)
-        with open(npz_path, 'rb') as fp:
+        with open(npz_path, "rb") as fp:
             arrays = dict(np.load(fp))
         # Add a spin dimension if not present
-        if arrays['bands'].ndim == 2:
-            arrays['bands'] = np.expand_dims(arrays['bands'], 0)
-        if arrays['occupations'].ndim == 2:
-            arrays['occupations'] = np.expand_dims(arrays['occupations'], 0)
-        # Ignore occupations if all zeros
-        if np.all(np.isclose(arrays['occupations'], 0)):
-            arrays.pop('occupations')
-        return cls(**arrays,
-                   fermi_energy=metadata.get('fermi_energy'),
-                   n_electrons=metadata.get('number_of_electrons'))
+        if arrays["bands"].ndim == 2:
+            arrays["bands"] = np.expand_dims(arrays["bands"], 0)
+        if arrays["occupations"].ndim == 2:
+            arrays["occupations"] = np.expand_dims(arrays["occupations"], 0)
+        # Ignore occupations and Fermi energy if occupations all zeros
+        if np.all(np.isclose(arrays["occupations"], 0)):
+            arrays.pop("occupations")
+            metadata.pop("fermi_energy", None)
+        return cls(**arrays, fermi_energy=metadata.get("fermi_energy"), n_electrons=metadata.get("number_of_electrons"))
 
     @property
     def n_spins(self) -> int:
@@ -107,23 +148,23 @@ class BandStructure:
         return self.bands.shape[2]
 
     @property
-    def max_occupation(self) -> int:
+    def max_occupation(self) -> float:
         """Maximum occupation (1 for non-spin-polarized, 2 for collinear spin-polarized).
 
         Returns:
-            int: Maximum occupation.
+            float: Maximum occupation.
         """
         if self.n_spins == 1:
-            return 2
+            max_occupation = 2.0
         elif self.n_spins == 2:
-            return 1
+            max_occupation = 1.0
         else:
-            raise ValueError(
-                f'Unknown maximum occupation for n_spins={self.n_spins}')
+            raise ValueError(f"Unknown maximum occupation for n_spins={self.n_spins}")
+        return max_occupation
 
-    def compute_occupations_from_fermi(self, fermi_energy: float,
-                                       smearing_type: str,
-                                       smearing_width: float) -> npt.NDArray:
+    def compute_occupations_from_fermi(
+        self, fermi_energy: float, smearing_type: str, smearing_width: float
+    ) -> npt.NDArray:
         """Compute the occupations given a Fermi energy and smearing.
 
         Args:
@@ -138,16 +179,13 @@ class BandStructure:
             npt.NDArray: Occupations array.
         """
         if self.n_electrons is None:
-            raise ValueError(
-                "Cannot compute occupations if number of electrons is unknown."
-            )
-        smearing = smearing_from_name(smearing_type)(center=fermi_energy,
-                                                     width=smearing_width)
+            raise ValueError("Cannot compute occupations if number of electrons is unknown.")
+        smearing = smearing_from_name(smearing_type)(center=fermi_energy, width=smearing_width)
         return self.max_occupation * smearing.occupation(self.bands)
 
-    def compute_smeared_dos(self, energies: npt.NDArray,
-                            smearing_type: ty.Union[str, int],
-                            smearing_width: float) -> npt.NDArray:
+    def compute_smeared_dos(
+        self, energies: npt.NDArray, smearing_type: ty.Union[str, int], smearing_width: float
+    ) -> npt.NDArray:
         """Compute a smeared density of states from the band structure (see `smeared_dos`).
 
         Args:
@@ -158,8 +196,7 @@ class BandStructure:
         Returns:
             npt.NDArray: (n_spins, n_energies) array containing the DOS for each spin channel
         """
-        return smeared_dos(energies, self.bands, self.weights, smearing_type,
-                           smearing_width)
+        return smeared_dos(energies, self.bands, self.weights, smearing_type, smearing_width)
 
     def is_metallic(self, tol: float = 1e-6) -> bool:
         """Check if the band structure is metallic.
@@ -180,9 +217,8 @@ class BandStructure:
         bands = np.transpose(self.bands, (0, 2, 1)).reshape((self.n_spins * self.n_bands, self.n_kpoints))
 
         return bool(
-            np.any(
-                np.any(bands < self.fermi_energy - tol, axis=1)
-                & np.any(bands > self.fermi_energy + tol, axis=1)))
+            np.any(np.any(bands < self.fermi_energy - tol, axis=1) & np.any(bands > self.fermi_energy + tol, axis=1))
+        )
 
     def is_insulating(self, tol: float = 1e-6) -> bool:
         """Check if the band structure is insulating.

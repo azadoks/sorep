@@ -167,3 +167,6 @@ data
 
 # Poetry
 poetry.lock
+
+# VS Code
+.vscode/

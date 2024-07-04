@@ -1,17 +1,21 @@
+"""Density of states."""
+
 import typing as ty
+
 import numpy as np
 import numpy.typing as npt
+
 from .smearing import smearing_from_name
 
-__all__ = ('smeared_dos',)
+__all__ = ("smeared_dos",)
 
 
 def smeared_dos(
     energies: npt.NDArray[np.float64],
     bands: npt.NDArray[np.float64],
     weights: npt.NDArray[np.float64],
-    smearing_type: ty.Union[str,int],
-    smearing_width: float
+    smearing_type: ty.Union[str, int],
+    smearing_width: float,
 ) -> npt.NDArray[np.float64]:
     """Compute a smeared density of states.
 
@@ -27,9 +31,9 @@ def smeared_dos(
     """
     smearing_cls = smearing_from_name(smearing_type)
     dos = np.zeros((energies.shape[0], bands.shape[0]))
-    for (i, energy) in enumerate(energies):
+    for i, energy in enumerate(energies):
         smearing = smearing_cls(center=energy, width=smearing_width)
         occ_deriv = smearing.occupation_derivative(bands)
-        dos[i] = np.einsum('skn,k->s', occ_deriv, weights)
+        dos[i] = np.einsum("skn,k->s", occ_deriv, weights)
 
     return (dos / smearing_width).T
