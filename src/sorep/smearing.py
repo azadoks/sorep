@@ -3,9 +3,12 @@
 from abc import ABC, abstractmethod
 import typing as ty
 
-import numpy as np
-import numpy.typing as npt
-import scipy as sp
+import jax.typing as jty
+
+# import jax.numpy as jnp
+# import jax.scipy as jsp
+import numpy as jnp
+import scipy as jsp
 
 __all__ = (
     "Smearing",
@@ -16,7 +19,7 @@ __all__ = (
     "smearing_from_name",
 )
 
-MAX_EXP_ARG = 200.0  # Maximum argument for exponential functions, taken from QE
+MAX_EXPONENT = 200.0
 
 
 class Smearing(ABC):
@@ -32,96 +35,126 @@ class Smearing(ABC):
     def __str__(self) -> str:
         return self.__repr__()
 
-    def _scale(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        return (self.center - bands) / self.width
+    def _scale(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        return (x - self.center) / self.width
 
     @abstractmethod
-    def occupation(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        """Compute the occupation function (cumulative distribution function)."""
+    def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        """Compute the occupation function (cumulative distribution function mirrored around x)."""
 
     @abstractmethod
-    def occupation_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        """Compute the derivative of the occupation function (probability density function)."""
+    def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        """Compute the negative derivative of the occupation function (probability density function)."""
 
     @abstractmethod
-    def occupation_2nd_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        """Compute the second derivative (curvature) of the occupation function."""
+    def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        """Compute the negative second derivative (curvature) of the occupation function."""
 
 
 class Delta(Smearing):
     """No smearing, i.e. a true step/delta function."""
 
-    def occupation(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        return np.where(bands < self.center, 1.0, 0.0)
+    def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        x = self._scale(x)
+        return jnp.where(x <= 0.0, 1.0, 0.0)
 
-    def occupation_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        return np.where(bands == self.center, -np.inf, 0.0)
+    def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        return jnp.zeros_like(x)
 
-    #! This may not be correct, should be checked
-    def occupation_2nd_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        return np.where(bands == self.center, -np.inf, 0.0)
-
-
-class Gaussian(Smearing):
-    """Gaussian smearing."""
-
-    def occupation(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        return 0.5 * sp.special.erfc(-self._scale(bands))
-
-    def occupation_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands) ** 2
-        return np.where(
-            x > MAX_EXP_ARG,
-            1.0 / np.sqrt(np.pi) * np.exp(-MAX_EXP_ARG),
-            1.0 / np.sqrt(np.pi) * np.exp(-x),
-        )
-
-    #! This may not be correct, should be checked
-    def occupation_2nd_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands)
-        z = self._scale(bands) ** 2
-        return np.where(
-            z > MAX_EXP_ARG,
-            -2.0 * x / np.sqrt(np.pi) * np.exp(-MAX_EXP_ARG),
-            -2.0 * x / np.sqrt(np.pi) * np.exp(-z),
-        )
+    def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        return jnp.zeros_like(x)
 
 
 class FermiDirac(Smearing):
     """Fermi-Dirac smearing."""
 
-    def occupation(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands)
-        return np.where(x < -MAX_EXP_ARG, 0.0, np.where(x > MAX_EXP_ARG, 1.0, 1.0 / (1.0 + np.exp(-x))))
+    def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        x = self._scale(x)
+        return jnp.where(x < -MAX_EXPONENT, 1.0, jnp.where(x > MAX_EXPONENT, 0.0, 1.0 / (1.0 + jnp.exp(x))))
 
-    def occupation_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands)
-        return np.where(np.abs(x) > MAX_EXP_ARG, 0.0, 1.0 / (2 + np.exp(-x) + np.exp(x)))
+    def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        x = self._scale(x)
+        dx = jnp.where(jnp.abs(x) > MAX_EXPONENT, 0.0, -1.0 / (2.0 + jnp.exp(x) + jnp.exp(-x)))  # avoid overflow
+        return -dx  # pylint: disable=invalid-unary-operand-type
 
-    #! This may not be correct, should be checked
-    def occupation_2nd_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands)
-        return np.where(np.abs(x) > MAX_EXP_ARG, 0.0, -(np.exp(x) - np.exp(-x)) / (2.0 + np.exp(-x) + np.exp(x)) ** 2)
+    def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        x = self._scale(x)
+        ddx = jnp.where(
+            jnp.abs(x) > MAX_EXPONENT,  # avoid overflow
+            0.0,
+            (jnp.exp(x) - jnp.exp(-x)) / (2.0 + jnp.exp(-x) + jnp.exp(x)) ** 2,
+        )
+        return -ddx  # pylint: disable=invalid-unary-operand-type
+
+
+class Gaussian(Smearing):
+    """Gaussian smearing."""
+
+    def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        x = self._scale(x)
+        return jnp.where(x < -MAX_EXPONENT, 1.0, jnp.where(x > MAX_EXPONENT, 0.0, 0.5 * jsp.special.erfc(x)))
+
+    def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        x = self._scale(x)
+        dx = jnp.where(
+            jnp.abs(x) > jnp.sqrt(MAX_EXPONENT), 0.0, -1.0 / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))  # avoid overflow
+        )
+        return -dx  # pylint: disable=invalid-unary-operand-type
+
+    def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        x = self._scale(x)
+        ddx = jnp.where(
+            jnp.abs(x) > jnp.sqrt(MAX_EXPONENT), 0.0, 2.0 * x / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))  # avoid overflow
+        )
+        return -ddx  # pylint: disable=invalid-unary-operand-type
+
+    # def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
+    #     x = self._scale(x)
+    #     return 0.5 * jsp.special.erfc(x)
+
+    # def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+    #     x = self._scale(x)
+    #     dx = -1.0 / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))
+    #     return -dx
+
+    # def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+    #     x = self._scale(x)
+    #     ddx = 2.0 * x / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))
+    #     return -ddx
 
 
 class Cold(Smearing):
     """Marzari-Vanderbilt-DeVita-Payne (cold) smearing."""
 
-    def occupation(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands) - 1.0 / np.sqrt(2.0)
-        z = np.minimum(x**2, MAX_EXP_ARG)
-        return 0.5 * sp.special.erf(x) + 1 / np.sqrt(2.0 * np.pi) * np.exp(-z) + 0.5
+    def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
+        return jnp.where(
+            z < -jnp.sqrt(MAX_EXPONENT),  # avoid overflow
+            1.0,
+            jnp.where(
+                z > jnp.sqrt(MAX_EXPONENT),  # avoid overflow
+                0.0,
+                -0.5 * jsp.special.erf(z) + 1 / jnp.sqrt(2.0 * jnp.pi) * jnp.exp(-(z**2)) + 0.5,
+            ),
+        )
 
-    def occupation_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands) - 1.0 / np.sqrt(2.0)
-        z = np.minimum(x**2, MAX_EXP_ARG)
-        return 1 / (2 * np.sqrt(np.pi)) * np.exp(-z) * (2.0 - np.sqrt(2.0) * x)
+    def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
+        dx = jnp.where(
+            jnp.abs(z) > jnp.sqrt(MAX_EXPONENT),  # avoid overflow
+            0.0,
+            -jnp.exp(-(z**2)) * (jnp.sqrt(2) * z + 1) / jnp.sqrt(jnp.pi),
+        )
+        return -dx  # pylint: disable=invalid-unary-operand-type
 
-    #! This may not be correct, should be checked
-    def occupation_2nd_derivative(self, bands: npt.ArrayLike) -> npt.ArrayLike:
-        x = self._scale(bands)
-        z = np.minimum((x - 1.0 / np.sqrt(2.0)) ** 2, MAX_EXP_ARG)
-        return 1 / (2 * np.sqrt(np.pi)) * np.exp(-z) * (2.0 * np.sqrt(2.0) * x**2 - 6.0 * x + np.sqrt(2.0))
+    def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+        z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
+        ddx = jnp.where(
+            jnp.abs(z) > jnp.sqrt(MAX_EXPONENT),  # avoid overflow
+            0.0,
+            jnp.exp(-(z**2)) * (2.0 * jnp.sqrt(2.0) * z**2 + 2.0 * z - jnp.sqrt(2.0)) / jnp.sqrt(jnp.pi),
+        )
+        return -ddx  # pylint: disable=invalid-unary-operand-type
 
 
 def smearing_from_name(name: ty.Optional[ty.Union[str, int]]) -> Smearing:
@@ -129,7 +162,7 @@ def smearing_from_name(name: ty.Optional[ty.Union[str, int]]) -> Smearing:
 
     Supported names are:
 
-        * NoSmearing: None
+        * Delta: None, 'fixed'
         * GaussianSmearing: 'gauss', 'gaussian', '0', 0
         * FermiDiracSmearing: 'fd', 'f-d', 'fermi-dirac', '-99', -99
         * ColdSmearing: 'mv', 'm-v', 'marzari-vanderbilt', 'cold', '-1', -1
@@ -143,9 +176,12 @@ def smearing_from_name(name: ty.Optional[ty.Union[str, int]]) -> Smearing:
     Returns:
         Smearing: smearing class.
     """
-    if name is None:
+    if isinstance(name, int):
+        name = str(name)
+    if isinstance(name, str):
+        name = name.lower()
+    if name is None or name == "fixed":
         smearing = Delta
-    name = str(name).lower()
     if name in ("mv", "m-v", "marzari-vanderbilt", "cold", "-1"):
         smearing = Cold
     elif name in ("gauss", "gaussian", "0"):

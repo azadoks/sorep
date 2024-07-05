@@ -16,11 +16,10 @@ repos:
     hooks:
     -   id: pylint
         language: system
-        exclude: &exclude_files >
+        exclude: &exclude_pylint >
           (?x)^(
               docs/.*|
               scripts/.*|
-              examples/.*|
           )$
 
 -   repo: https://github.com/psf/black-pre-commit-mirror
@@ -28,3 +27,8 @@ repos:
     hooks:
     - id: black
       language_version: python3.11
+      exclude: &exclude_black >
+          (?x)^(
+              docs/.*|
+              scripts/.*|
+          )$

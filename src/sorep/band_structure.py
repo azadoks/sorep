@@ -5,11 +5,10 @@ import os
 import typing as ty
 
 import numpy as np
-from numpy import ma
 import numpy.typing as npt
 
+from . import fermi
 from .dos import smeared_dos
-from .smearing import smearing_from_name
 
 __all__ = ()
 
@@ -20,46 +19,53 @@ class BandStructure:
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
-        bands: npt.NDArray[np.float64],
-        kpoints: npt.NDArray[np.float64],
-        weights: npt.NDArray[np.float64],
-        occupations: ty.Optional[npt.NDArray[np.float64]] = None,
-        labels: ty.Optional[npt.NDArray[np.float64]] = None,
-        label_numbers: ty.Optional[npt.NDArray[np.float64]] = None,
+        bands: npt.ArrayLike,
+        kpoints: npt.ArrayLike,
+        weights: npt.ArrayLike,
+        occupations: ty.Optional[npt.ArrayLike] = None,
+        labels: ty.Optional[npt.ArrayLike] = None,
+        label_numbers: ty.Optional[npt.ArrayLike] = None,
         fermi_energy: ty.Optional[float] = None,
         n_electrons: ty.Optional[int] = None,
     ):
         """Initialize a band structure.
 
         Args:
-            bands (npt.NDArray[np.float64]): (n_spins, n_kpoints, n_bands) eigenvalues/bands.
-            kpoints (npt.NDArray[np.float64]): (n_kpoints, 3) k-points.
-            weights (npt.NDArray[np.float64]): (n_kpoints,) k-point weights.
-            occupations (ty.Optional[npt.NDArray[np.float64]], optional): (n_spins, n_kpoints, n_bands)
+            bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands.
+            kpoints (npt.ArrayLike): (n_kpoints, 3) k-points.
+            weights (npt.ArrayLike): (n_kpoints,) k-point weights.
+            occupations (ty.Optional[npt.ArrayLike], optional): (n_spins, n_kpoints, n_bands)
                 band occupations. Defaults to None.
-            labels (ty.Optional[npt.NDArray[np.float64]], optional): (n_labels,) k-point labels. Defaults to None.
-            label_numbers (ty.Optional[npt.NDArray[np.float64]], optional): (n_labels,) k-point label indices.
+            labels (ty.Optional[npt.ArrayLike], optional): (n_labels,) k-point labels. Defaults to None.
+            label_numbers (ty.Optional[npt.ArrayLike], optional): (n_labels,) k-point label indices.
                 Defaults to None.
             fermi_energy (ty.Optional[float], optional): Fermi energy. Defaults to None.
             n_electrons (ty.Optional[int], optional): number of electrons. Defaults to None.
         """
-        # Check that the bands are the expected shape
+        # Check all the shapes
         assert bands.ndim == 3
+        assert kpoints.ndim == 2
+        assert kpoints.shape[1] == 3
+        assert weights.ndim == 1
+        assert kpoints.shape[0] == weights.shape[0] == bands.shape[1]
         if occupations is not None:
             assert occupations.ndim == 3
             assert occupations.shape == bands.shape
-        # Check that the vectors are vectors
-        assert kpoints.ndim == weights.ndim == 1
-        # Check that the k-points are 3D
-        assert kpoints.shape[1] == 3
-        # Check that the k-points shape is consistent
-        assert kpoints.shape == weights.shape == bands.shape[1:2]
-        # Check that the Fermi energy makes sense
-        if fermi_energy is not None:
-            assert np.min(bands) <= fermi_energy <= np.max(bands)
+        if labels is not None:
+            assert labels.ndim == 1
+        if label_numbers is not None:
+            assert label_numbers.ndim == 1
+        if labels is not None and label_numbers is not None:
+            assert labels.shape == label_numbers.shape
         # Check that the number of electrons makes sense
         if n_electrons is not None:
             assert n_electrons >= 0
+
+        # Normalize the sum of the k-weights to 1
+        total_weight = weights.sum()
+        if not (np.isclose(total_weight, 1, atol=1e-8) or np.isclose(total_weight, 2, atol=1e-8)):
+            raise ValueError(f"Total weight is {total_weight}, is expected to be 1 or 2.")
+        weights /= total_weight
 
         self.bands = bands
         self.kpoints = kpoints
@@ -162,43 +168,75 @@ class BandStructure:
             raise ValueError(f"Unknown maximum occupation for n_spins={self.n_spins}")
         return max_occupation
 
-    def compute_occupations_from_fermi(
-        self, fermi_energy: float, smearing_type: str, smearing_width: float
-    ) -> npt.NDArray:
+    def compute_occupations(
+        self, smearing_type: str, smearing_width: float, fermi_energy: ty.Optional[float] = None
+    ) -> npt.ArrayLike:
         """Compute the occupations given a Fermi energy and smearing.
 
         Args:
-            fermi_energy (float): Fermi energy.
             smearing_type (str): Smearing type (see `smearing_from_name`).
             smearing_width (float): Smearing width.
-
-        Raises:
-            ValueError: If number of electrons is unknown.
+            fermi_energy (ty.Optional[float]): Fermi energy. Defaults to the stored Fermi energy.
 
         Returns:
-            npt.NDArray: Occupations array.
+            npt.ArrayLike: Occupations array.
+        """
+        fermi_energy = fermi_energy if fermi_energy is not None else self.fermi_energy
+        return fermi.compute_occupations(self.bands, fermi_energy, smearing_type, smearing_width)
+
+    def compute_n_electrons(
+        self, smearing_type: str, smearing_width: float, fermi_energy: ty.Optional[float] = None
+    ) -> float:
+        """Compute the number of electrons from the provided Fermi energy.
+
+        Args:
+            smearing_type (str): Smearing type (see `smearing_from_name`).
+            smearing_width (float): Smearing width.
+            fermi_energy (ty.Optional[float]): Fermi energy. Defaults to the stored Fermi energy.
+
+        Returns:
+            float: Fermi energy.
+        """
+        fermi_energy = fermi_energy if fermi_energy is not None else self.fermi_energy
+        return fermi.compute_n_electrons(self.bands, self.weights, fermi_energy, smearing_type, smearing_width)
+
+    def find_fermi_energy(self, smearing_type: str, smearing_width: float, n_electrons_tol: float = 1e-6) -> float:
+        """Find a Fermi energy that yields the correct number of electrons.
+
+        Args:
+            smearing_type (str): type of smearing (see `smearing_from_name`)
+            smearing_width (float): smearing width
+            n_electrons_tol (float, optional): tolerance on the number of electrons as a function of the found Fermi
+                energy. Defaults to 1e-6.
+
+        Raises:
+            ValueError: if the number of electrons is unknown.
+
+        Returns:
+            float: Fermi energy
         """
         if self.n_electrons is None:
-            raise ValueError("Cannot compute occupations if number of electrons is unknown.")
-        smearing = smearing_from_name(smearing_type)(center=fermi_energy, width=smearing_width)
-        return self.max_occupation * smearing.occupation(self.bands)
+            raise ValueError("Cannot find the Fermi level if the number of electrons is unknown.")
+        return fermi.find_fermi_energy(
+            self.bands, self.weights, smearing_type, smearing_width, self.n_electrons, n_electrons_tol
+        )
 
     def compute_smeared_dos(
-        self, energies: npt.NDArray, smearing_type: ty.Union[str, int], smearing_width: float
-    ) -> npt.NDArray:
+        self, energies: npt.ArrayLike, smearing_type: ty.Union[str, int], smearing_width: float
+    ) -> npt.ArrayLike:
         """Compute a smeared density of states from the band structure (see `smeared_dos`).
 
         Args:
-            energies (npt.NDArray): energies at which to sample the DOS
+            energies (npt.ArrayLike): energies at which to sample the DOS
             smearing_type (ty.Union[str,int]): type of smearing (see `smearing_from_name`)
             smearing_width (float): smearing width
 
         Returns:
-            npt.NDArray: (n_spins, n_energies) array containing the DOS for each spin channel
+            npt.ArrayLike: (n_spins, n_energies) array containing the DOS for each spin channel
         """
         return smeared_dos(energies, self.bands, self.weights, smearing_type, smearing_width)
 
-    def is_metallic(self, tol: float = 1e-6) -> bool:
+    def is_metallic(self, tol: float = 1e-6) -> ty.Union[bool, None]:
         """Check if the band structure is metallic.
 
         Args:
@@ -208,6 +246,9 @@ class BandStructure:
             bool: True if any band has at least one eigenvalue above and below the Fermi energy +/- tol.
         """
         if self.fermi_energy is None:
+            return None
+        if self.fermi_energy >= np.max(self.bands):
+            # All bands are fully-occupied in this case; can't know if the material is a metal or insulator.
             return None
 
         # Flatten the spin axis so that each row ia a band
@@ -245,7 +286,7 @@ class BandStructure:
             return None
         # Mask the conduction bands and find the maximum of the rest of the bands,
         # i.e. the valence bands
-        return np.max(ma.array(self.bands, mask=self.bands > self.fermi_energy))
+        return np.max(self.bands[self.bands <= self.fermi_energy])
 
     @property
     def cbm(self) -> float:
@@ -257,4 +298,4 @@ class BandStructure:
         if self.fermi_energy is None:
             return None
         # See `vbm`
-        return np.min(ma.array(self.bands, mask=self.bands < self.fermi_energy))
+        return np.min(self.bands[self.bands >= self.fermi_energy])
