@@ -34,6 +34,7 @@ pre-commit = "^3.7.1"
 pylint = "^3.2.5"
 black = "^24.4.2"
 importlib-resources = "^6.4.0"
+pandas = "^2.2.2"
 
 [tool.isort]
 profile = "black"

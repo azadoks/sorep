@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 import json
 import os
+import pathlib as pl
 
 from ase import Atoms
 from ase.io.extxyz import read_extxyz
@@ -33,6 +34,7 @@ class MaterialData:
         Returns:
             MaterialData: Material data object.
         """
+        dir_path = pl.Path(dir_path)
         structure_path = dir_path / "structure.xyz"
         bands_path = dir_path / "bands.npz"
         metadata_path = dir_path / "metadata.json"

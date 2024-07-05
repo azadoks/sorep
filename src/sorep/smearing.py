@@ -3,9 +3,12 @@
 from abc import ABC, abstractmethod
 import typing as ty
 
-import jax.numpy as jnp
-import jax.scipy as jsp
 import jax.typing as jty
+
+# import jax.numpy as jnp
+# import jax.scipy as jsp
+import numpy as jnp
+import scipy as jsp
 
 __all__ = (
     "Smearing",
@@ -15,6 +18,8 @@ __all__ = (
     "Cold",
     "smearing_from_name",
 )
+
+MAX_EXPONENT = 200.0
 
 
 class Smearing(ABC):
@@ -65,33 +70,57 @@ class FermiDirac(Smearing):
 
     def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
         x = self._scale(x)
-        return 1.0 / (1.0 + jnp.exp(x))
+        return jnp.where(x < -MAX_EXPONENT, 1.0, jnp.where(x > MAX_EXPONENT, 0.0, 1.0 / (1.0 + jnp.exp(x))))
 
     def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
         x = self._scale(x)
-        dx = -1.0 / (2.0 + jnp.exp(x) + jnp.exp(-x))
-        return -dx
+        dx = jnp.where(jnp.abs(x) > MAX_EXPONENT, 0.0, -1.0 / (2.0 + jnp.exp(x) + jnp.exp(-x)))  # avoid overflow
+        return -dx  # pylint: disable=invalid-unary-operand-type
 
     def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
         x = self._scale(x)
-        ddx = (jnp.exp(x) - jnp.exp(-x)) / (2.0 + jnp.exp(-x) + jnp.exp(x)) ** 2
-        return -ddx
+        ddx = jnp.where(
+            jnp.abs(x) > MAX_EXPONENT,  # avoid overflow
+            0.0,
+            (jnp.exp(x) - jnp.exp(-x)) / (2.0 + jnp.exp(-x) + jnp.exp(x)) ** 2,
+        )
+        return -ddx  # pylint: disable=invalid-unary-operand-type
 
 
 class Gaussian(Smearing):
     """Gaussian smearing."""
 
     def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
-        return 0.5 * jsp.special.erfc(self._scale(x))
+        x = self._scale(x)
+        return jnp.where(x < -MAX_EXPONENT, 1.0, jnp.where(x > MAX_EXPONENT, 0.0, 0.5 * jsp.special.erfc(x)))
 
     def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
-        dx = -1.0 / jnp.sqrt(jnp.pi) * jnp.exp(-self._scale(x) ** 2)
-        return -dx
+        x = self._scale(x)
+        dx = jnp.where(
+            jnp.abs(x) > jnp.sqrt(MAX_EXPONENT), 0.0, -1.0 / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))  # avoid overflow
+        )
+        return -dx  # pylint: disable=invalid-unary-operand-type
 
     def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
         x = self._scale(x)
-        ddx = 2.0 * x / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))
-        return -ddx
+        ddx = jnp.where(
+            jnp.abs(x) > jnp.sqrt(MAX_EXPONENT), 0.0, 2.0 * x / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))  # avoid overflow
+        )
+        return -ddx  # pylint: disable=invalid-unary-operand-type
+
+    # def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
+    #     x = self._scale(x)
+    #     return 0.5 * jsp.special.erfc(x)
+
+    # def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+    #     x = self._scale(x)
+    #     dx = -1.0 / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))
+    #     return -dx
+
+    # def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
+    #     x = self._scale(x)
+    #     ddx = 2.0 * x / jnp.sqrt(jnp.pi) * jnp.exp(-(x**2))
+    #     return -ddx
 
 
 class Cold(Smearing):
@@ -99,17 +128,33 @@ class Cold(Smearing):
 
     def occupation(self, x: jty.ArrayLike) -> jty.ArrayLike:
         z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
-        return -0.5 * jsp.special.erf(z) + 1 / jnp.sqrt(2.0 * jnp.pi) * jnp.exp(-(z**2)) + 0.5
+        return jnp.where(
+            z < -jnp.sqrt(MAX_EXPONENT),  # avoid overflow
+            1.0,
+            jnp.where(
+                z > jnp.sqrt(MAX_EXPONENT),  # avoid overflow
+                0.0,
+                -0.5 * jsp.special.erf(z) + 1 / jnp.sqrt(2.0 * jnp.pi) * jnp.exp(-(z**2)) + 0.5,
+            ),
+        )
 
     def occupation_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
         z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
-        dx = -jnp.exp(-(z**2)) * (jnp.sqrt(2) * z + 1) / jnp.sqrt(jnp.pi)
-        return -dx
+        dx = jnp.where(
+            jnp.abs(z) > jnp.sqrt(MAX_EXPONENT),  # avoid overflow
+            0.0,
+            -jnp.exp(-(z**2)) * (jnp.sqrt(2) * z + 1) / jnp.sqrt(jnp.pi),
+        )
+        return -dx  # pylint: disable=invalid-unary-operand-type
 
     def occupation_2nd_derivative(self, x: jty.ArrayLike) -> jty.ArrayLike:
         z = self._scale(x) + 1.0 / jnp.sqrt(2.0)
-        ddx = jnp.exp(-(z**2)) * (2.0 * jnp.sqrt(2.0) * z**2 + 2.0 * z - jnp.sqrt(2.0)) / jnp.sqrt(jnp.pi)
-        return -ddx
+        ddx = jnp.where(
+            jnp.abs(z) > jnp.sqrt(MAX_EXPONENT),  # avoid overflow
+            0.0,
+            jnp.exp(-(z**2)) * (2.0 * jnp.sqrt(2.0) * z**2 + 2.0 * z - jnp.sqrt(2.0)) / jnp.sqrt(jnp.pi),
+        )
+        return -ddx  # pylint: disable=invalid-unary-operand-type
 
 
 def smearing_from_name(name: ty.Optional[ty.Union[str, int]]) -> Smearing:
