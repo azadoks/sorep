@@ -261,7 +261,7 @@ class BandStructure:
             np.any(np.any(bands < self.fermi_energy - tol, axis=1) & np.any(bands > self.fermi_energy + tol, axis=1))
         )
 
-    def is_insulating(self, tol: float = 1e-6) -> bool:
+    def is_insulating(self, tol: float = 1e-6) -> ty.Optional[bool]:
         """Check if the band structure is insulating.
 
         Args:
@@ -276,7 +276,7 @@ class BandStructure:
         return not is_metallic
 
     @property
-    def vbm(self) -> float:
+    def vbm(self) -> ty.Optional[float]:
         """The valence band maximum.
 
         Returns:
@@ -284,12 +284,14 @@ class BandStructure:
         """
         if self.fermi_energy is None:
             return None
+        if self.fermi_energy >= np.max(self.bands):
+            return np.max(self.bands)
         # Mask the conduction bands and find the maximum of the rest of the bands,
         # i.e. the valence bands
         return np.max(self.bands[self.bands <= self.fermi_energy])
 
     @property
-    def cbm(self) -> float:
+    def cbm(self) -> ty.Optional[float]:
         """The conduction band minimum.
 
         Returns:
@@ -297,5 +299,21 @@ class BandStructure:
         """
         if self.fermi_energy is None:
             return None
+        if self.fermi_energy >= np.max(self.bands):
+            return np.max(self.bands)
         # See `vbm`
         return np.min(self.bands[self.bands >= self.fermi_energy])
+
+    @property
+    def band_gap(self) -> ty.Optional[float]:
+        """The band gap.
+
+        Returns:
+            float: band gap.
+        """
+        if self.vbm is None or self.cbm is None:
+            return None
+        gap = self.cbm - self.vbm
+        if gap < 0:
+            return None
+        return gap

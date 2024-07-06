@@ -18,7 +18,7 @@ E_MAX = 5
 
 for (name, dirs) in {
         'scf': list(scf_dirs),
-        'zero-shot': zero_shot_dirs,
+        'zero-shot': list(zero_shot_dirs),
 }.items():
     print('#' * 10 + ' ' + name.upper() + ' ' + '#' * 10)
     for dir_ in tqdm(dirs):
@@ -44,10 +44,13 @@ for (name, dirs) in {
             smearing_width=SMEARING_WIDTH
         )
 
-        energies_fermi_scissor = np.concatenate([
-            np.linspace(material.bands.vbm - 2, material.bands.vbm + 3 * SMEARING_WIDTH, 256),
-            np.linspace(material.bands.cbm - 3 * SMEARING_WIDTH, material.bands.cbm + 2, 256)
-        ])
+        if material.bands.is_insulating() and (material.bands.band_gap > 6 * SMEARING_WIDTH):
+            energies_fermi_scissor = np.concatenate([
+                np.linspace(material.bands.vbm - 2, material.bands.vbm + 3 * SMEARING_WIDTH, 256),
+                np.linspace(material.bands.cbm - 3 * SMEARING_WIDTH, material.bands.cbm + 2, 256)
+            ])
+        else:
+            energies_fermi_scissor = np.linspace(material.bands.vbm - 2, material.bands.cbm + 2, 512)
         dos_fermi_scissor = material.bands.compute_smeared_dos(
             energies=energies_fermi_scissor,
             smearing_type=SMEARING_TYPE,

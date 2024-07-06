@@ -11,18 +11,18 @@ __all__ = ("smeared_dos",)
 
 
 def smeared_dos(
-    energies: npt.NDArray[np.float64],
-    bands: npt.NDArray[np.float64],
-    weights: npt.NDArray[np.float64],
+    energies: npt.ArrayLike,
+    bands: npt.ArrayLike,
+    weights: npt.ArrayLike,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
-) -> npt.NDArray[np.float64]:
+) -> npt.ArrayLike:
     """Compute a smeared density of states.
 
     Args:
-        energies (npt.NDArray[np.float64]): energies at which to sample the DOS
-        bands (npt.NDArray[np.float64]): (n_spins, n_kpoints, n_bands) array of eigenvalues
-        weights (npt.NDArray[np.float64]): (n_kpoints,) array of k-point weights
+        energies (npt.ArrayLike): energies at which to sample the DOS
+        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) array of eigenvalues
+        weights (npt.ArrayLike): (n_kpoints,) array of k-point weights
         smearing_type (ty.Union[str,int]): type of smearing (see `smearing_from_name`)
         smearing_width (float): smearing width
 
