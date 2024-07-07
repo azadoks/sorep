@@ -166,6 +166,10 @@ def _dump_result(
     if recompute_fermi_occupations:
         bandstructure = sorep.BandStructure(**bands_arrays, n_electrons=metadata['number_of_electrons'])
         fermi_energy = bandstructure.find_fermi_energy(metadata['smearing'], metadata['degauss'], n_electrons_tol=1e-4)
+        # Move the Fermi energy to mid-gap if insulating
+        bandstructure.fermi_energy = fermi_energy
+        if bandstructure.is_insulating():
+            fermi_energy = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
         occupations = bandstructure.compute_occupations(metadata['smearing'], metadata['degauss'], fermi_energy)
         metadata['fermi_energy'] = fermi_energy
         bands_arrays['occupations'] = occupations
