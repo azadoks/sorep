@@ -20,15 +20,17 @@ repos:
           (?x)^(
               docs/.*|
               scripts/.*|
+              data/.*|
           )$
 
 -   repo: https://github.com/psf/black-pre-commit-mirror
     rev: 24.4.2
     hooks:
     - id: black
-      language_version: python3.11
+      language_version: python3.9
       exclude: &exclude_black >
           (?x)^(
               docs/.*|
               scripts/.*|
+              data/.*|
           )$

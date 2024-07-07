@@ -1,11 +1,12 @@
 # %%
-import pathlib as pl
 from multiprocessing import Pool
+import pathlib as pl
 
 import numpy as np
 from tqdm import tqdm
 
 import sorep
+
 # %%
 SMEARING_TYPE = 'gauss'
 SMEARING_WIDTH = 0.05  # eV

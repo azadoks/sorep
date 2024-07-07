@@ -93,9 +93,7 @@ class Gaussian(Smearing):
 
     def occupation_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        dx = np.where(
-            np.abs(x) > np.sqrt(MAX_EXPONENT), 0.0, -1.0 / np.sqrt(np.pi) * np.exp(-(x**2))  # avoid overflow
-        )
+        dx = np.where(np.abs(x) > np.sqrt(MAX_EXPONENT), 0.0, -1.0 / np.sqrt(np.pi) * np.exp(-(x**2)))  # avoid overflow
         return -dx  # pylint: disable=invalid-unary-operand-type
 
     def occupation_2nd_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:

@@ -1,7 +1,7 @@
 # %%
+from datetime import datetime
 import json
 import pathlib as pl
-from datetime import datetime
 
 from aiida import load_profile, orm, plugins
 from ase.io.extxyz import write_extxyz
