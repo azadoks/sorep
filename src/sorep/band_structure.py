@@ -43,13 +43,16 @@ class BandStructure:
             n_electrons (ty.Optional[int], optional): number of electrons. Defaults to None.
         """
         # Check all the shapes
+        if bands.ndim == 2:  # Add a spin dimension if not present
+            bands = np.expand_dims(bands, 0)
         assert bands.ndim == 3
         assert kpoints.ndim == 2
         assert kpoints.shape[1] == 3
         assert weights.ndim == 1
         assert kpoints.shape[0] == weights.shape[0] == bands.shape[1]
         if occupations is not None:
-            assert occupations.ndim == 3
+            if occupations.ndim == 2:  # Add a spin dimension if not present
+                occupations = np.expand_dims(occupations, 0)
             assert occupations.shape == bands.shape
         if labels is not None:
             assert labels.ndim == 1
@@ -115,11 +118,6 @@ class BandStructure:
         # Load arrays (eigenvalues/bands, k-points, etc.)
         with open(npz_path, "rb") as fp:
             arrays = dict(np.load(fp))
-        # Add a spin dimension if not present
-        if arrays["bands"].ndim == 2:
-            arrays["bands"] = np.expand_dims(arrays["bands"], 0)
-        if arrays["occupations"].ndim == 2:
-            arrays["occupations"] = np.expand_dims(arrays["occupations"], 0)
         # Ignore occupations and Fermi energy if occupations all zeros
         if np.all(np.isclose(arrays["occupations"], 0)):
             arrays.pop("occupations")
