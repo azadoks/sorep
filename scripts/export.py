@@ -250,7 +250,7 @@ def main(dry_run: bool=False, recompute_fermi_occupations: bool=True):
     print(f'[{name:9s}] De-duplicating...')
     zero_shot_qr = _deduplicate(zero_shot_qr)
     print(f'[{name:9s}] Unique {len(zero_shot_qr)}')
-    for res in tqdm(zero_shot_qr, desc='[ZERO-SHOT] Dumping...', ncols=80):
+    for res in tqdm(zero_shot_qr, desc=f'[{name:9s}] Dumping...', ncols=80):
         _dump_result(res, calc_type='zero_shot', recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
     print()
 
@@ -261,7 +261,7 @@ def main(dry_run: bool=False, recompute_fermi_occupations: bool=True):
     print(f'[{name:9s}] De-duplicating...')
     scf_qr = _deduplicate(scf_qr)
     print(f'[{name:9s}] Unique {len(scf_qr)}')
-    for res in tqdm(scf_qr, desc='[SCF] Dumping...', ncols=80):
+    for res in tqdm(scf_qr, desc=f'[{name:9s}] Dumping...', ncols=80):
         _dump_result(res, calc_type='scf', recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
     print()
 
@@ -272,7 +272,7 @@ def main(dry_run: bool=False, recompute_fermi_occupations: bool=True):
     print(f'[{name:9s}] De-duplicating...')
     bands_qr = _deduplicate(bands_qr)
     print(f'[{name:9s}] Unique {len(bands_qr)}')
-    for res in tqdm(bands_qr, desc='[BANDS] Dumping...', ncols=80):
+    for res in tqdm(bands_qr, desc=f'[{name:9s}] Dumping...', ncols=80):
         _dump_result(res, calc_type='bands', recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
 
     return zero_shot_qr, scf_qr, bands_qr
