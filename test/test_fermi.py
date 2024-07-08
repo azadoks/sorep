@@ -91,6 +91,7 @@ def test_find_fermi_energy(bandstructure):
         bands=bandstructure.bands,
         kpoints=bandstructure.kpoints,
         weights=bandstructure.weights,
+        cell=bandstructure.cell,
         occupations=bandstructure.occupations,
         fermi_energy=bandstructure.fermi_energy,
         n_electrons=bandstructure.n_electrons,

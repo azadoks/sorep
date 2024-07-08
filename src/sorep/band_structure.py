@@ -8,8 +8,10 @@ from ase.io import read
 import numpy as np
 import numpy.typing as npt
 
-from . import fermi, pbc
+from . import fermi
+from .band_segment import BandPathSegment
 from .dos import smeared_dos
+from .pbc import recip_cart_to_frac, recip_frac_to_cart
 
 __all__ = ()
 
@@ -89,7 +91,7 @@ class BandStructure:
 
         # Convert to fractional coordinates if necessary
         if kpoints_are_cartesian:
-            kpoints = pbc.recip_cart_to_frac(kpoints, cell)
+            kpoints = recip_cart_to_frac(kpoints, cell)
 
         # Normalize the sum of the k-weights to 1
         total_weight = weights.sum()
@@ -221,6 +223,66 @@ class BandStructure:
         else:
             raise ValueError(f"Unknown maximum occupation for n_spins={self.n_spins}")
         return max_occupation
+
+    @property
+    def fractional_kpoints(self) -> npt.ArrayLike:
+        """Fractional k-points.
+
+        Returns:
+            npt.ArrayLike: (n_kpoints, 3) fractional k-points.
+        """
+        return self.kpoints
+
+    @property
+    def cartesian_kpoints(self) -> npt.ArrayLike:
+        """Cartesian k-points.
+
+        Returns:
+            npt.ArrayLike: (n_kpoints, 3) Cartesian k-points.
+        """
+        return recip_frac_to_cart(self.kpoints, self.cell)
+
+    @property
+    def linear_k(self) -> npt.ArrayLike:
+        """Linearized k-points.
+
+        Returns:
+            npt.ArrayLike: (n_kpoints, ) vector of linearized k-points.
+        """
+        # Compute distances between adjacent k-points
+        distances = np.linalg.norm(np.diff(self.cartesian_kpoints, axis=0), axis=1)
+        # Set distance to zero when adjacent k-points are both labeled (likely a discontinuity)
+        mask = np.array([i in self.label_numbers and i - 1 in self.label_numbers for i in range(1, self.n_kpoints)])
+        distances[mask] = 0.0
+        # Prepend 0 (the linear location of the first k-point)
+        linear_k = np.concatenate([[0], np.cumsum(distances)])
+        return linear_k
+
+    @property
+    def path_segments(self) -> ty.List[BandPathSegment]:
+        """Segments of the band structure.
+
+        Returns:
+            list[BandPathSegment]: List of band path segments.
+        """
+        linear_k = self.linear_k
+        # Construct the segments
+        segments = []
+        for i_from, i_to in zip(range(len(self.labels) - 1), range(1, len(self.labels))):
+            ik_from = self.label_numbers[i_from]
+            ik_to = self.label_numbers[i_to] + 1
+            segment = BandPathSegment(
+                bands=self.bands[:, ik_from:ik_to].copy(),
+                linear_k=linear_k[ik_from:ik_to].copy(),
+                fermi_energy=self.fermi_energy if self.fermi_energy else None,
+                start_label=self.labels[i_from],
+                stop_label=self.labels[i_to],
+                start_index=ik_from,
+                stop_index=ik_to,
+            )
+            segments.append(segment)
+
+        return segments
 
     def compute_occupations(
         self, smearing_type: str, smearing_width: float, fermi_energy: ty.Optional[float] = None

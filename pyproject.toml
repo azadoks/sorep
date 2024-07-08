@@ -60,6 +60,7 @@ good-names = [
     'dx',
     'dy',
     'dz',
+    'dk',
     'ef',
     'ne'
 ]

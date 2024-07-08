@@ -7,6 +7,8 @@ import numpy as np
 import numpy.typing as npt
 import scipy as sp
 
+from .constants import MAX_EXPONENT
+
 __all__ = (
     "Smearing",
     "Delta",
@@ -15,8 +17,6 @@ __all__ = (
     "Cold",
     "smearing_from_name",
 )
-
-MAX_EXPONENT = 200.0  # 710 on my system
 
 
 class Smearing(ABC):
@@ -67,20 +67,19 @@ class FermiDirac(Smearing):
 
     def occupation(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        return np.where(x > MAX_EXPONENT, 0.0, 1.0 / (1.0 + np.exp(x)))
+        x = np.clip(x, a_min=-np.inf, a_max=MAX_EXPONENT)  # avoid overflow
+        return 1.0 / (1.0 + np.exp(x))
 
     def occupation_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        d_dx = np.where(np.abs(x) > MAX_EXPONENT, 0.0, -1.0 / (2.0 + np.exp(x) + np.exp(-x)))  # avoid overflow
+        x = np.clip(x, a_min=-MAX_EXPONENT, a_max=MAX_EXPONENT)  # avoid overflow
+        d_dx = -1.0 / (2.0 + np.exp(x) + np.exp(-x))
         return -d_dx  # pylint: disable=invalid-unary-operand-type
 
     def occupation_2nd_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        d2_dx2 = np.where(
-            np.abs(x) > MAX_EXPONENT,  # avoid overflow
-            0.0,
-            (np.exp(x) - np.exp(-x)) / (2.0 + np.exp(-x) + np.exp(x)) ** 2,
-        )
+        x = np.clip(x, a_min=-MAX_EXPONENT, a_max=MAX_EXPONENT)  # avoid overflow
+        d2_dx2 = (np.exp(x) - np.exp(-x)) / (2.0 + np.exp(-x) + np.exp(x)) ** 2
         return -d2_dx2  # pylint: disable=invalid-unary-operand-type
 
 
