@@ -1,86 +1,56 @@
 # %%
+import json
 import pathlib as pl
 
-from findiff import FinDiff
-import numpy as np
-import scipy as sp
+from matplotlib import colormaps
+import matplotlib.pyplot as plt
+import pandas as pd
 
-import sorep
-from sorep.constants import *
-from sorep.smearing import smearing_from_name
+# e = hc/λ
+# λ = hc/e
+PLANCK_CONSTANT_EVS = 6.582119569e-16  # eV s
+PLANCK_CONSTANT_EV_HZ = 4.135667696e-15  # eV Hz^-1
+SPEED_OF_LIGHT_M_S = 299792458  # m / s
+
+
+def ev_to_nm(energy):
+    return (PLANCK_CONSTANT_EVS * SPEED_OF_LIGHT_M_S / energy) * 1e9
+
+
+def nm_to_ev(wavelength):
+    return PLANCK_CONSTANT_EVS * SPEED_OF_LIGHT_M_S / (wavelength * 1e-9)
+
 
 # %%
-material = sorep.MaterialData.from_dir(list(pl.Path("../data/mc3d/").glob('*/bands/'))[37])
+criteria = []
+eff_masses = []
+for dir_ in pl.Path("../data/mc3d/").glob("*/bands/"):
+    with open(dir_ / "tcm_criteria.json", "r", encoding="utf-8") as fp:
+        tmp = json.load(fp)
+    eff_masses.append(tmp.pop("effective_masses"))
+    criteria.append({"sorep_id": dir_.parent.name, **tmp})
 
-segments = material.bands.path_segments
-segment = segments[1]
+criteria = pd.DataFrame(criteria).dropna(axis="index")
+eff_masses = pd.DataFrame(eff_masses)
 
-cbm = material.bands.cbm
-vbm = material.bands.vbm
-smearing_type = 'fermi-dirac'
-smearing_width = ROOM_TEMP_EV
-acc = 2
-
-dk = np.mean(np.diff(segment.linear_k))
-assert np.allclose(np.diff(segment.linear_k), dk)
-
-# Convert units to Hartree atomic so that the effective mass is in atomic units (electron masses)
-dk /= ANGSTROM_TO_BOHR
-cbm *= EV_TO_HARTREE
-vbm *= EV_TO_HARTREE
-bands = segment.bands * EV_TO_HARTREE
-fermi_energy = segment.fermi_energy * EV_TO_HARTREE
-smearing_width = smearing_width * EV_TO_HARTREE
-
-smearing_cls = smearing_from_name(smearing_type)
-d2_dk2 = FinDiff(0, dk, 2, acc=acc)
-
-try:
-    conduction = np.hstack([
-        bands_spin[:, np.all(bands_spin > fermi_energy, axis=0)]
-        for bands_spin in bands
-    ])
-    conduction_curvature = d2_dk2(conduction)
-    conduction_occupations = smearing_cls(
-        cbm, smearing_width).occupation(conduction)
-    conduction_num = sp.integrate.simpson(y=conduction_occupations,
-                                          dx=dk,
-                                          axis=0).sum()
-    conduction_denom = sp.integrate.simpson(y=(conduction_occupations *
-                                                conduction_curvature),
-                                            dx=dk,
-                                            axis=0).sum()
-    electron_effective_mass = conduction_num / conduction_denom
-
-    valence = np.hstack([
-        bands_spin[:, np.all(bands_spin < fermi_energy, axis=0)]
-        for bands_spin in bands
-    ])
-    valence_curvature = d2_dk2(valence)
-    valence_occupations = smearing_cls(-vbm, smearing_width).occupation(-valence)
-    valence_num = sp.integrate.simpson(y=valence_occupations,
-                                        dx=dk,
-                                        axis=0).sum()
-    valence_denom = sp.integrate.simpson(y=(valence_occupations *
-                                            valence_curvature),
-                                            dx=dk,
-                                            axis=0).sum()
-    hole_effective_mass = valence_num / valence_denom
-except IndexError:
-    electron_effective_mass = np.nan
-    hole_effective_mass = np.nan
-
-(electron_effective_mass, hole_effective_mass)
+tcms = criteria[criteria.meets_band_gap & criteria.meets_electron_effective_mass & criteria.meets_hole_effective_mass]
 # %%
-explicit_conduction = []
-explicit_valence = []
-for i_spin in range(bands.shape[0]):
-    for i_band in range(bands.shape[2]):
-        if np.all(bands[i_spin, :, i_band] > fermi_energy):
-            explicit_conduction.append(bands[i_spin, :, i_band])
-        if np.all(bands[i_spin, :, i_band] < fermi_energy):
-            explicit_valence.append(bands[i_spin, :, i_band])
-explicit_conduction = np.array(explicit_conduction).T
-explicit_valence = np.array(explicit_valence).T
+tcms
+# %%
+fig, axes = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+
+axes[0].scatter(tcms.band_gap, -tcms.hole_effective_mass, marker=".")
+axes[0].axhline(1.0, color="black", linestyle="--")
+axes[0].set_xlabel("Band gap (eV)")
+axes[0].set_ylabel("Hole effective mass")
+
+axes[1].scatter(tcms.band_gap, tcms.electron_effective_mass, marker=".")
+axes[1].axhline(0.5, color="black", linestyle="--")
+axes[1].set_xlabel("Band gap (eV)")
+axes[1].set_ylabel("Electron effective mass")
+
+
+for ax in axes:
+    ax.axvline(0.5, color="black", linestyle="--")
 
 # %%
