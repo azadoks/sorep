@@ -6,7 +6,7 @@ import os
 import pathlib as pl
 
 from ase import Atoms
-from ase.io.extxyz import read_extxyz
+from ase.io import read
 
 from .band_structure import BandStructure
 
@@ -61,8 +61,8 @@ class MaterialData:
             MaterialData: Material data object.
         """
         with open(structure_path, "r", encoding="utf-8") as fp:
-            atoms = list(read_extxyz(fp))[0]
-        bands = BandStructure.from_npz_metadata(bands_path, metadata_path)
+            atoms = read(fp, index=0)
+        bands = BandStructure.from_npz_xyz_metadata(bands_path, structure_path, metadata_path)
         with open(metadata_path, "r", encoding="utf-8") as fp:
             metadata = json.load(fp)
         return cls(atoms, bands, metadata)

@@ -4,17 +4,18 @@ import json
 import os
 import typing as ty
 
+from ase.io import read
 import numpy as np
 import numpy.typing as npt
 
-from . import fermi
+from . import fermi, pbc
 from .dos import smeared_dos
 
 __all__ = ()
 
 
 class BandStructure:
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes,too-many-branches,too-many-statements
     """Band structure data and useful operations."""
 
     def __init__(  # pylint: disable=too-many-arguments
@@ -22,11 +23,13 @@ class BandStructure:
         bands: npt.ArrayLike,
         kpoints: npt.ArrayLike,
         weights: npt.ArrayLike,
+        cell: npt.ArrayLike,
         occupations: ty.Optional[npt.ArrayLike] = None,
         labels: ty.Optional[npt.ArrayLike] = None,
         label_numbers: ty.Optional[npt.ArrayLike] = None,
         fermi_energy: ty.Optional[float] = None,
         n_electrons: ty.Optional[int] = None,
+        kpoints_are_cartesian: bool = False,
     ):
         """Initialize a band structure.
 
@@ -34,6 +37,7 @@ class BandStructure:
             bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands.
             kpoints (npt.ArrayLike): (n_kpoints, 3) k-points.
             weights (npt.ArrayLike): (n_kpoints,) k-point weights.
+            cell (npt.ArrayLike): (3, 3) unit cell with rows as the cell vectors.
             occupations (ty.Optional[npt.ArrayLike], optional): (n_spins, n_kpoints, n_bands)
                 band occupations. Defaults to None.
             labels (ty.Optional[npt.ArrayLike], optional): (n_labels,) k-point labels. Defaults to None.
@@ -42,27 +46,50 @@ class BandStructure:
             fermi_energy (ty.Optional[float], optional): Fermi energy. Defaults to None.
             n_electrons (ty.Optional[int], optional): number of electrons. Defaults to None.
         """
+        # Convert to numpy arrays
+        bands = np.ascontiguousarray(bands)
+        kpoints = np.ascontiguousarray(kpoints)
+        weights = np.ascontiguousarray(weights)
+        cell = np.ascontiguousarray(cell)
+        if occupations is not None:
+            occupations = np.ascontiguousarray(occupations)
+
         # Check all the shapes
         if bands.ndim == 2:  # Add a spin dimension if not present
             bands = np.expand_dims(bands, 0)
         assert bands.ndim == 3
+
         assert kpoints.ndim == 2
         assert kpoints.shape[1] == 3
+
         assert weights.ndim == 1
+
+        assert cell.ndim == 2
+        assert cell.shape[0] == cell.shape[1] == 3
+
         assert kpoints.shape[0] == weights.shape[0] == bands.shape[1]
+
         if occupations is not None:
             if occupations.ndim == 2:  # Add a spin dimension if not present
                 occupations = np.expand_dims(occupations, 0)
             assert occupations.shape == bands.shape
+
         if labels is not None:
             assert labels.ndim == 1
+
         if label_numbers is not None:
             assert label_numbers.ndim == 1
+
         if labels is not None and label_numbers is not None:
             assert labels.shape == label_numbers.shape
+
         # Check that the number of electrons makes sense
         if n_electrons is not None:
             assert n_electrons >= 0
+
+        # Convert to fractional coordinates if necessary
+        if kpoints_are_cartesian:
+            kpoints = pbc.recip_cart_to_frac(kpoints, cell)
 
         # Normalize the sum of the k-weights to 1
         total_weight = weights.sum()
@@ -70,10 +97,29 @@ class BandStructure:
             raise ValueError(f"Total weight is {total_weight}, is expected to be 1 or 2.")
         weights /= total_weight
 
+        # Fix k-labels
+        if labels is not None and label_numbers is not None:
+            labels = list(labels)
+            label_numbers = list(label_numbers)
+            # If the first k-point does not have a label, give it a placeholder label, and
+            # add its index to the indices so that it can start a segment.
+            if label_numbers[0] != 0:
+                label_numbers.insert(0, 0)
+                labels.insert(0, "")
+            # Ditto with the last k-point; it needs to end the last segment
+            if label_numbers[-1] != kpoints.shape[0] - 1:
+                label_numbers.append(kpoints.shape[0] - 1)
+                labels.append("")
+        else:
+            # Set dummy labels and indices corresponding to the first and last k-points
+            labels = ["", ""]
+            label_numbers = [0, kpoints.shape[0] - 1]
+
         self.bands = bands
         self.kpoints = kpoints
         self.weights = weights
         self.occupations = occupations
+        self.cell = cell
         self.labels = labels
         self.label_numbers = label_numbers
         self.fermi_energy = fermi_energy
@@ -91,9 +137,11 @@ class BandStructure:
         )
 
     @classmethod
-    def from_npz_metadata(cls, npz_path: os.PathLike, json_path: ty.Optional[os.PathLike] = None) -> None:
-        """Load a band structure from an NPZ file containing arrays and
-        a JSON file containing metadata.
+    def from_npz_xyz_metadata(
+        cls, npz_path: os.PathLike, xyz_path: os.PathLike, json_path: ty.Optional[os.PathLike] = None
+    ) -> None:
+        """Load a band structure from an NPZ file containing arrays, an extended XYZ file containing a
+        periodic structure, and a JSON file containing metadata.
 
         The NPZ file should contain the following arrays:
         - bands: (n_spins, n_kpoints, n_bands) Eigenvalues/bands.
@@ -110,19 +158,27 @@ class BandStructure:
         Args:
             path (os.PathLike): Path to the NPZ file.
         """
+        # Load arrays (eigenvalues/bands, k-points, etc.)
+        with open(npz_path, "rb") as fp:
+            arrays = dict(np.load(fp))
+        # Load structure
+        with open(xyz_path, "r", encoding="utf-8") as fp:
+            atoms = read(fp, index=0)
         # Load metadata (Fermi energy, number of electrons, etc.)
         metadata = {}
         if json_path:
             with open(json_path, "r", encoding="utf-8") as fp:
                 metadata = json.load(fp)
-        # Load arrays (eigenvalues/bands, k-points, etc.)
-        with open(npz_path, "rb") as fp:
-            arrays = dict(np.load(fp))
         # Ignore occupations and Fermi energy if occupations all zeros
         if np.all(np.isclose(arrays["occupations"], 0)):
             arrays.pop("occupations")
             metadata.pop("fermi_energy", None)
-        return cls(**arrays, fermi_energy=metadata.get("fermi_energy"), n_electrons=metadata.get("number_of_electrons"))
+        return cls(
+            **arrays,
+            cell=atoms.cell.array,
+            fermi_energy=metadata.get("fermi_energy"),
+            n_electrons=metadata.get("number_of_electrons"),
+        )
 
     @property
     def n_spins(self) -> int:
@@ -289,6 +345,17 @@ class BandStructure:
         return np.max(self.bands[self.bands <= self.fermi_energy])
 
     @property
+    def vbm_index(self) -> ty.Optional[tuple[int, int, int]]:
+        """Cartesian index of the valence band maximum.
+
+        Returns:
+            ty.Optional[tuple[int,int,int]]: cartesian index.
+        """
+        if self.fermi_energy is None:
+            return None
+        return np.where(np.isclose(self.bands, self.vbm))
+
+    @property
     def cbm(self) -> ty.Optional[float]:
         """The conduction band minimum.
 
@@ -301,6 +368,17 @@ class BandStructure:
             return np.max(self.bands)
         # See `vbm`
         return np.min(self.bands[self.bands >= self.fermi_energy])
+
+    @property
+    def cbm_index(self) -> ty.Optional[tuple[npt.ArrayLike]]:
+        """Cartesian index of the conduction band minimum.
+
+        Returns:
+            ty.Optional[tuple[npt.ArrayLike]]: cartesian index.
+        """
+        if self.fermi_energy is None:
+            return None
+        return np.where(np.isclose(self.bands, self.cbm))
 
     @property
     def band_gap(self) -> ty.Optional[float]:

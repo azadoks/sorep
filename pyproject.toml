@@ -21,7 +21,7 @@ scipy = "^1.13.0"
 ase = "^3.23.0"
 scikit-learn = "^1.5.1"
 imbalanced-learn = "^0.12.3"
-jax = "^0.4.30"
+findiff = "^0.10.0"
 
 [tool.poetry.group.dev.dependencies]
 matplotlib = "^3.9.0"

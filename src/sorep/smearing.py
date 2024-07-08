@@ -16,7 +16,7 @@ __all__ = (
     "smearing_from_name",
 )
 
-MAX_EXPONENT = 200.0
+MAX_EXPONENT = 200.0  # 710 on my system
 
 
 class Smearing(ABC):
@@ -67,21 +67,21 @@ class FermiDirac(Smearing):
 
     def occupation(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        return np.where(x < -MAX_EXPONENT, 1.0, np.where(x > MAX_EXPONENT, 0.0, 1.0 / (1.0 + np.exp(x))))
+        return np.where(x > MAX_EXPONENT, 0.0, 1.0 / (1.0 + np.exp(x)))
 
     def occupation_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        dx = np.where(np.abs(x) > MAX_EXPONENT, 0.0, -1.0 / (2.0 + np.exp(x) + np.exp(-x)))  # avoid overflow
-        return -dx  # pylint: disable=invalid-unary-operand-type
+        d_dx = np.where(np.abs(x) > MAX_EXPONENT, 0.0, -1.0 / (2.0 + np.exp(x) + np.exp(-x)))  # avoid overflow
+        return -d_dx  # pylint: disable=invalid-unary-operand-type
 
     def occupation_2nd_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        ddx = np.where(
+        d2_dx2 = np.where(
             np.abs(x) > MAX_EXPONENT,  # avoid overflow
             0.0,
             (np.exp(x) - np.exp(-x)) / (2.0 + np.exp(-x) + np.exp(x)) ** 2,
         )
-        return -ddx  # pylint: disable=invalid-unary-operand-type
+        return -d2_dx2  # pylint: disable=invalid-unary-operand-type
 
 
 class Gaussian(Smearing):
@@ -93,15 +93,17 @@ class Gaussian(Smearing):
 
     def occupation_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        dx = np.where(np.abs(x) > np.sqrt(MAX_EXPONENT), 0.0, -1.0 / np.sqrt(np.pi) * np.exp(-(x**2)))  # avoid overflow
-        return -dx  # pylint: disable=invalid-unary-operand-type
+        d_dx = np.where(
+            np.abs(x) > np.sqrt(MAX_EXPONENT), 0.0, -1.0 / np.sqrt(np.pi) * np.exp(-(x**2))
+        )  # avoid overflow
+        return -d_dx  # pylint: disable=invalid-unary-operand-type
 
     def occupation_2nd_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
         x = self._scale(x)
-        ddx = np.where(
+        d2_dx2 = np.where(
             np.abs(x) > np.sqrt(MAX_EXPONENT), 0.0, 2.0 * x / np.sqrt(np.pi) * np.exp(-(x**2))  # avoid overflow
         )
-        return -ddx  # pylint: disable=invalid-unary-operand-type
+        return -d2_dx2  # pylint: disable=invalid-unary-operand-type
 
     # def occupation(self, x: npt.ArrayLike) -> npt.ArrayLike:
     #     x = self._scale(x)
@@ -114,42 +116,42 @@ class Gaussian(Smearing):
 
     # def occupation_2nd_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
     #     x = self._scale(x)
-    #     ddx = 2.0 * x / np.sqrt(np.pi) * np.exp(-(x**2))
-    #     return -ddx
+    #     d2_dx2 = 2.0 * x / np.sqrt(np.pi) * np.exp(-(x**2))
+    #     return -d2_dx2
 
 
 class Cold(Smearing):
     """Marzari-Vanderbilt-DeVita-Payne (cold) smearing."""
 
     def occupation(self, x: npt.ArrayLike) -> npt.ArrayLike:
-        z = self._scale(x) + 1.0 / np.sqrt(2.0)
+        arg = self._scale(x) + 1.0 / np.sqrt(2.0)
         return np.where(
-            z < -np.sqrt(MAX_EXPONENT),  # avoid overflow
+            arg < -np.sqrt(MAX_EXPONENT),  # avoid overflow
             1.0,
             np.where(
-                z > np.sqrt(MAX_EXPONENT),  # avoid overflow
+                arg > np.sqrt(MAX_EXPONENT),  # avoid overflow
                 0.0,
-                -0.5 * sp.special.erf(z) + 1 / np.sqrt(2.0 * np.pi) * np.exp(-(z**2)) + 0.5,
+                -0.5 * sp.special.erf(arg) + 1 / np.sqrt(2.0 * np.pi) * np.exp(-(arg**2)) + 0.5,
             ),
         )
 
     def occupation_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
-        z = self._scale(x) + 1.0 / np.sqrt(2.0)
-        dx = np.where(
-            np.abs(z) > np.sqrt(MAX_EXPONENT),  # avoid overflow
+        arg = self._scale(x) + 1.0 / np.sqrt(2.0)
+        d_dx = np.where(
+            np.abs(arg) > np.sqrt(MAX_EXPONENT),  # avoid overflow
             0.0,
-            -np.exp(-(z**2)) * (np.sqrt(2) * z + 1) / np.sqrt(np.pi),
+            -np.exp(-(arg**2)) * (np.sqrt(2) * arg + 1) / np.sqrt(np.pi),
         )
-        return -dx  # pylint: disable=invalid-unary-operand-type
+        return -d_dx  # pylint: disable=invalid-unary-operand-type
 
     def occupation_2nd_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
-        z = self._scale(x) + 1.0 / np.sqrt(2.0)
-        ddx = np.where(
-            np.abs(z) > np.sqrt(MAX_EXPONENT),  # avoid overflow
+        arg = self._scale(x) + 1.0 / np.sqrt(2.0)
+        d2_dx2 = np.where(
+            np.abs(arg) > np.sqrt(MAX_EXPONENT),  # avoid overflow
             0.0,
-            np.exp(-(z**2)) * (2.0 * np.sqrt(2.0) * z**2 + 2.0 * z - np.sqrt(2.0)) / np.sqrt(np.pi),
+            np.exp(-(arg**2)) * (2.0 * np.sqrt(2.0) * arg**2 + 2.0 * arg - np.sqrt(2.0)) / np.sqrt(np.pi),
         )
-        return -ddx  # pylint: disable=invalid-unary-operand-type
+        return -d2_dx2  # pylint: disable=invalid-unary-operand-type
 
 
 def smearing_from_name(name: ty.Optional[ty.Union[str, int]]) -> Smearing:

@@ -1,6 +1,6 @@
 """Spectral operator representations."""
 
-from . import band_structure, dos, fermi, material, smearing
+from . import band_structure, dos, fermi, material, pbc, prettify, smearing
 from .band_structure import BandStructure
 from .material import MaterialData
 

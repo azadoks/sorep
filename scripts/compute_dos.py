@@ -65,7 +65,7 @@ def _featurize(dir_):
 # %%
 def main():
     dirs = list(pl.Path('../data/mc3d/').glob('*/zero_shot')) + list(pl.Path('../data/mc3d/').glob('*/scf'))
-    pbar = tqdm(dirs, desc='Compute SOREP features')
+    pbar = tqdm(dirs, desc='Compute SOREP features', ncols=80)
     with Pool(processes=12, maxtasksperchild=1) as p:
         p.map(_featurize, pbar)
 
