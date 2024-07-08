@@ -4,8 +4,12 @@ import pathlib as pl
 
 import numpy as np
 
-
 # %%
+# TODO:
+# - Collate targets into one npz
+# - Collate features into one npz per feature type
+# - Collate metadata (criteria, fermi energy, etc.) into another npz
+
 def load_data(
     calculation: str = "zero_shot",
     features: list[str] = ["fermi_centered", "vbm_centered", "fermi_scissor"],
