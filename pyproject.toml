@@ -16,10 +16,10 @@ exclude = [
 
 [tool.poetry.dependencies]
 python = "^3.9"
-numpy = "<2.0"
+numpy = "^1.20"
 scipy = "^1.13.0"
 ase = "^3.23.0"
-scikit-learn = "^1.5.1"
+scikit-learn = "^1.5.0"
 imbalanced-learn = "^0.12.3"
 findiff = "^0.10.0"
 
@@ -35,6 +35,7 @@ pylint = "^3.2.5"
 black = "^24.4.2"
 importlib-resources = "^6.4.0"
 pandas = "^2.2.2"
+jax = "^0.4.30"
 
 [tool.isort]
 profile = "black"

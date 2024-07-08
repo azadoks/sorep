@@ -27,7 +27,7 @@ repos:
     rev: 24.4.2
     hooks:
     - id: black
-      language_version: python3.9
+      language_version: python3
       exclude: &exclude_black >
           (?x)^(
               docs/.*|
