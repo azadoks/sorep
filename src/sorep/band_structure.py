@@ -100,7 +100,7 @@ class BandStructure:
         weights /= total_weight
 
         # Fix k-labels
-        if labels is not None and label_numbers is not None:
+        if labels and label_numbers:
             labels = list(labels)
             label_numbers = list(label_numbers)
             # If the first k-point does not have a label, give it a placeholder label, and

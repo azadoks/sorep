@@ -1,36 +1,41 @@
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
-    hooks:
-    -   id: end-of-file-fixer
-    -   id: mixed-line-ending
-    -   id: trailing-whitespace
+    - repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v4.6.0
+      hooks:
+          - id: end-of-file-fixer
+          - id: mixed-line-ending
+          - id: trailing-whitespace
 
--   repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-    -   id: isort
+    - repo: https://github.com/pycqa/isort
+      rev: 5.12.0
+      hooks:
+          - id: isort
 
--   repo: https://github.com/PyCQA/pylint
-    rev: v3.2.3
-    hooks:
-    -   id: pylint
-        language: system
-        exclude: &exclude_pylint >
-          (?x)^(
-              docs/.*|
-              scripts/.*|
-              data/.*|
-          )$
+    - repo: https://github.com/PyCQA/pylint
+      rev: v3.2.3
+      hooks:
+          - id: pylint
+            language: system
+            exclude: &exclude_pylint >
+                (?x)^(
+                    docs/.*|
+                    scripts/.*|
+                    data/.*|
+                )$
 
--   repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 24.4.2
-    hooks:
-    - id: black
-      language_version: python3
-      exclude: &exclude_black >
-          (?x)^(
-              docs/.*|
-              scripts/.*|
-              data/.*|
-          )$
+    - repo: https://github.com/psf/black-pre-commit-mirror
+      rev: 24.4.2
+      hooks:
+          - id: black
+            language_version: python3
+            exclude: &exclude_black >
+                (?x)^(
+                    docs/.*|
+                    scripts/.*|
+                    data/.*|
+                )$
+
+    - repo: https://github.com/srstevenson/nb-clean
+      rev: 3.3.0
+      hooks:
+          - id: nb-clean

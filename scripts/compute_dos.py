@@ -28,7 +28,7 @@ def _featurize(dir_):
         energies=energies_fermi_centered, smearing_type=SMEARING_TYPE, smearing_width=SMEARING_WIDTH
     )
 
-    energies_vbm_centered = np.linspace(material.bands.vbm - 2, material.bands.fermi_energy + 6, N_ENERGIES)
+    energies_vbm_centered = np.linspace(material.bands.vbm - 2, material.bands.vbm + 6, N_ENERGIES)
     dos_vbm_centered = material.bands.compute_smeared_dos(
         energies=energies_vbm_centered, smearing_type=SMEARING_TYPE, smearing_width=SMEARING_WIDTH
     )
