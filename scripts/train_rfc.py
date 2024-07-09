@@ -2,51 +2,69 @@
 import imblearn.ensemble as imbe
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scipy as sp
-import sklearn.ensemble as ske
 import sklearn.metrics as skm
 import sklearn.model_selection as skms
-import sklearn.preprocessing as skp
+import sklearn.pipeline as skpl
+import sklearn.preprocessing as skpp
 
-# %%
-with open("../data/mc3d_dos_fermi_centered_gauss_0.05.npz", "rb") as fp:
-    data = dict(np.load(fp))
+# %%  Load data
+with open("../data/mc3d_targets.npz", "rb") as fp:
+    npz = np.load(fp)
+    target_df = pd.DataFrame(data=dict(npz))
 
-N = data["features"].shape[0]
-# %%
+with open("../data/mc3d_features_single_shot_dos_fermi_centered_gauss_0.05.npz", "rb") as fp:
+    npz = np.load(fp)
+    feature_df = pd.DataFrame(data={k: v.tolist() for (k, v) in npz.items()})
+
+df = pd.merge(target_df, feature_df, on="material_id")
+X = np.array(df["features"].tolist())
+y = df["meets_tcm_criteria"].to_numpy()
+
+# Create constant hold-out validation set of 10% of the data
+X, X_val, y, y_val = skms.train_test_split(X, y, test_size=0.1, random_state=9997)
+
+# %% Pre-process data
+train_size = 0.01
 random_state = np.random.randint(0, 2**32 - 1)
+X_train, X_test, y_train, y_test = skms.train_test_split(X, y, train_size=train_size, random_state=random_state)
+# %% Create pipeline
+pipe = skpl.Pipeline(
+    [
+        ("scaler", skpp.StandardScaler()),
+        (
+            "gscv",
+            skms.GridSearchCV(
+                imbe.BalancedRandomForestClassifier(),
+                param_grid={
+                    "n_estimators": [500],
+                    "class_weight": ["balanced", "balanced_subsample"],
+                    "sampling_strategy": ["all", "minority", "not minority", "not majority", "all"],
+                    "replacement": [True, False],
+                    "bootstrap": [True, False],
+                    "ccp_alpha": [0e-0, 1e-3, 5e-3, 1e-2],
+                    "random_state": [0],
+                },
+                n_jobs=-1,
+            ),
+        ),
+    ]
+)
+# %% Fit and evaluate
+pipe.fit(X_train, y_train)
 
-X_train, X_test, y_train, y_test = skms.train_test_split(
-    data["features"], data["meets_tcm_criteria"], train_size=0.10, random_state=random_state
-)
-# %%
-scaler = skp.StandardScaler()
-scaler.fit(X_train)
-X_train = scaler.transform(X_train)
-X_test = scaler.transform(X_test)
-# %%
-rfc = imbe.BalancedRandomForestClassifier(
-    n_estimators=400,
-    random_state=random_state,
-    class_weight="balanced",
-    sampling_strategy="all",
-    replacement=True,
-    bootstrap=False,
-)
-# %%
-rfc.fit(X_train, y_train)
-# %%
-y_train_pred = rfc.predict(X_train)
-y_test_pred = rfc.predict(X_test)
+y_train_pred = pipe.predict(X_train)
+y_test_pred = pipe.predict(X_test)
 
 # %%
 fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 
 cm_train = skm.confusion_matrix(y_true=y_train, y_pred=y_train_pred)
 skm.ConfusionMatrixDisplay(cm_train).plot(ax=axes[0])
-axes[0].set_title("Train")
+axes[0].set_title(f"Train (f={train_size}|N={len(y_train)})")
 
 cm_test = skm.confusion_matrix(y_true=y_test, y_pred=y_test_pred)
 skm.ConfusionMatrixDisplay(cm_test).plot(ax=axes[1])
-axes[1].set_title("Test")
+axes[1].set_title(f"Test (f={1-train_size}|N={len(y_test)})")
 # %%

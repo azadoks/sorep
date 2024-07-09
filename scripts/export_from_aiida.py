@@ -39,12 +39,7 @@ BANDS_KWARGS = {
     "cls": orm.BandsData,
     "tag": "bands",
     "with_incoming": "calculation",
-    "project": [
-        "*",
-        "uuid",
-        "attributes.labels",
-        "attributes.label_numbers"
-    ]
+    "project": ["*", "uuid", "attributes.labels", "attributes.label_numbers"],
 }
 
 OUTPUT_KWARGS = {
@@ -82,6 +77,8 @@ INPUT_KWARGS = {
 }
 
 DATA_DIR = pl.Path("../data/mc3d/")
+
+
 # %%
 def _get_metadata(res: dict) -> dict:
     """Construct metadata dictionary from a query result
@@ -102,8 +99,8 @@ def _get_metadata(res: dict) -> dict:
     db_version = res["structure"].get("extras.source.version", "unknown_version")
     db_version = "unknown_version" if db_version is None else db_version
 
-    if (id_ == 'unknown_id') and (db == 'unknown_db') and (db_version == 'unknown_version'):
-        sorep_id = res['structure']['uuid']
+    if (id_ == "unknown_id") and (db == "unknown_db") and (db_version == "unknown_version"):
+        sorep_id = res["structure"]["uuid"]
     else:
         sorep_id = "|".join([db, db_version, id_])
 
@@ -129,15 +126,11 @@ def _get_metadata(res: dict) -> dict:
         # Output parameters
         **{key.split(".")[-1]: value for (key, value) in res["output"].items()},
         # Input parameters
-        **{key.split(".")[-1]: value for (key, value) in res["input"].items()}
+        **{key.split(".")[-1]: value for (key, value) in res["input"].items()},
     }
 
-def _dump_result(
-    res: dict,
-    calc_type: str,
-    recompute_fermi_occupations: bool=True,
-    dry_run: bool=False
-) -> None:
+
+def _dump_result(res: dict, calc_type: str, recompute_fermi_occupations: bool = True, dry_run: bool = False) -> None:
     """Write the structure, bands, and metadata for a calculation from a query result dictionary.
 
     Args:
@@ -164,15 +157,15 @@ def _dump_result(
     }
 
     if recompute_fermi_occupations:
-        bandstructure = sorep.BandStructure(**bands_arrays, n_electrons=metadata['number_of_electrons'])
-        fermi_energy = bandstructure.find_fermi_energy(metadata['smearing'], metadata['degauss'], n_electrons_tol=1e-4)
+        bandstructure = sorep.BandStructure(**bands_arrays, n_electrons=metadata["number_of_electrons"])
+        fermi_energy = bandstructure.find_fermi_energy(metadata["smearing"], metadata["degauss"], n_electrons_tol=1e-4)
         # Move the Fermi energy to mid-gap if insulating
         bandstructure.fermi_energy = fermi_energy
         if bandstructure.is_insulating():
             fermi_energy = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
-        occupations = bandstructure.compute_occupations(metadata['smearing'], metadata['degauss'], fermi_energy)
-        metadata['fermi_energy'] = fermi_energy
-        bands_arrays['occupations'] = occupations
+        occupations = bandstructure.compute_occupations(metadata["smearing"], metadata["degauss"], fermi_energy)
+        metadata["fermi_energy"] = fermi_energy
+        bands_arrays["occupations"] = occupations
 
     if not dry_run:
         # Write structure
@@ -184,102 +177,104 @@ def _dump_result(
         with open(structure_calc_type_dir / "metadata.json", "w", encoding="utf-8") as fp:
             json.dump(metadata, fp)
 
-def _zero_shot_query() -> list[dict]:
+
+def _single_shot_query() -> list[dict]:
     qb = orm.QueryBuilder()
     qb.append(PwCalculation, tag="calculation", project=["uuid", "ctime"])
     qb.append(**STRUCTURE_KWARGS)
     qb.append(**BANDS_KWARGS)
-    qb.append(**{
-        **INPUT_KWARGS,
-        "filters": {"attributes.ELECTRONS.electron_maxstep": 0}
-    })
-    qb.append(**{
-        **OUTPUT_KWARGS,
-        "filters": {"attributes.dft_exchange_correlation": "PBE"}
-    })
+    qb.append(**{**INPUT_KWARGS, "filters": {"attributes.ELECTRONS.electron_maxstep": 0}})
+    qb.append(**{**OUTPUT_KWARGS, "filters": {"attributes.dft_exchange_correlation": "PBE"}})
     return qb.dict()
 
-def _scf_query(zero_shot_qr: list[dict]) -> list[dict]:
-    zero_shot_source_ids = [r["structure"]["extras.source.id"] for r in zero_shot_qr]
+
+def _scf_query(single_shot_qr: list[dict]) -> list[dict]:
+    single_shot_source_ids = [r["structure"]["extras.source.id"] for r in single_shot_qr]
     qb = orm.QueryBuilder()
     qb.append(PwBaseWorkChain, tag="calculation", project=["uuid", "ctime"])
     qb.append(
         **STRUCTURE_KWARGS,
-        filters={"extras.source.id": {"in": [id_ for id_ in zero_shot_source_ids if id_ is not None]}},
+        filters={"extras.source.id": {"in": [id_ for id_ in single_shot_source_ids if id_ is not None]}},
     )
     qb.append(**BANDS_KWARGS)
-    qb.append(**{
-        **INPUT_KWARGS,
-        "edge_filters": {"label": "pw__parameters"},
-        "filters": {
-            "attributes.ELECTRONS.electron_maxstep": {">": 0},
-            "attributes.CONTROL.calculation": "scf"
+    qb.append(
+        **{
+            **INPUT_KWARGS,
+            "edge_filters": {"label": "pw__parameters"},
+            "filters": {"attributes.ELECTRONS.electron_maxstep": {">": 0}, "attributes.CONTROL.calculation": "scf"},
         }
-    })
-    qb.append(**{
-        **OUTPUT_KWARGS,
-        "filters": {"attributes.dft_exchange_correlation": "PBE"}
-    })
+    )
+    qb.append(**{**OUTPUT_KWARGS, "filters": {"attributes.dft_exchange_correlation": "PBE"}})
     return qb.dict()
 
-def _bands_query(zero_shot_qr: list[dict]) -> list[dict]:
-    zero_shot_source_ids = [r["structure"]["extras.source.id"] for r in zero_shot_qr]
+
+def _bands_query(single_shot_qr: list[dict]) -> list[dict]:
+    single_shot_source_ids = [r["structure"]["extras.source.id"] for r in single_shot_qr]
     qb = orm.QueryBuilder()
     qb.append(PwBandsWorkChain, tag="calculation", project=["uuid", "ctime"])
     qb.append(
         **STRUCTURE_KWARGS,
-        filters={"extras.source.id": {"in": [id_ for id_ in zero_shot_source_ids if id_ is not None]}},
+        filters={"extras.source.id": {"in": [id_ for id_ in single_shot_source_ids if id_ is not None]}},
     )
     qb.append(**{**BANDS_KWARGS, "project": ["*", "uuid", "attributes.labels", "attributes.label_numbers"]})
     qb.append(**{**INPUT_KWARGS, "edge_filters": {"label": "bands__pw__parameters"}})
-    qb.append(**{
-        **OUTPUT_KWARGS,
-        "edge_filters": {"label": "band_parameters"},
-        "filters": {"attributes.dft_exchange_correlation": "PBESOL"}
-    })
+    qb.append(
+        **{
+            **OUTPUT_KWARGS,
+            "edge_filters": {"label": "band_parameters"},
+            "filters": {"attributes.dft_exchange_correlation": "PBESOL"},
+        }
+    )
     return qb.dict()
+
 
 def _deduplicate(qr: list[dict]) -> list[dict]:
     metadata_df = pd.DataFrame([_get_metadata(r) for r in qr])
-    metadata_df['calculation_ctime'] = metadata_df['calculation_ctime'].apply(datetime.fromisoformat)
-    metadata_df = metadata_df.sort_values(by='calculation_ctime')  # oldest first
-    metadata_df = metadata_df.drop_duplicates(subset='sorep_id', keep='last')  # get the newest
+    metadata_df["calculation_ctime"] = metadata_df["calculation_ctime"].apply(datetime.fromisoformat)
+    metadata_df = metadata_df.sort_values(by="calculation_ctime")  # oldest first
+    metadata_df = metadata_df.drop_duplicates(subset="sorep_id", keep="last")  # get the newest
     return [qr[i] for i in metadata_df.index]
+
+
 # %%
-def main(dry_run: bool=False, recompute_fermi_occupations: bool=True):
-    name = 'ZERO-SHOT'
-    print(f'[{name:9s}] Querying for calculations...')
-    zero_shot_qr = _zero_shot_query()
-    print(f'[{name:9s}] Found {len(zero_shot_qr)}')
-    print(f'[{name:9s}] De-duplicating...')
-    zero_shot_qr = _deduplicate(zero_shot_qr)
-    print(f'[{name:9s}] Unique {len(zero_shot_qr)}')
-    for res in tqdm(zero_shot_qr, desc=f'[{name:9s}] Dumping...', ncols=80):
-        _dump_result(res, calc_type='zero_shot', recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
+def main(dry_run: bool = False, recompute_fermi_occupations: bool = True):
+    name = "SINGLE-SHOT"
+    print(f"[{name:9s}] Querying for calculations...")
+    single_shot_qr = _single_shot_query()
+    print(f"[{name:9s}] Found {len(single_shot_qr)}")
+    print(f"[{name:9s}] De-duplicating...")
+    single_shot_qr = _deduplicate(single_shot_qr)
+    print(f"[{name:9s}] Unique {len(single_shot_qr)}")
+    for res in tqdm(single_shot_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
+        _dump_result(
+            res, calc_type="single_shot", recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run
+        )
     print()
 
-    name = 'SCF'
-    print(f'[{name:9s}] Querying for calculations...')
-    scf_qr = _scf_query(zero_shot_qr)
-    print(f'[{name:9s}] Found {len(scf_qr)}')
-    print(f'[{name:9s}] De-duplicating...')
+    name = "SCF"
+    print(f"[{name:9s}] Querying for calculations...")
+    scf_qr = _scf_query(single_shot_qr)
+    print(f"[{name:9s}] Found {len(scf_qr)}")
+    print(f"[{name:9s}] De-duplicating...")
     scf_qr = _deduplicate(scf_qr)
-    print(f'[{name:9s}] Unique {len(scf_qr)}')
-    for res in tqdm(scf_qr, desc=f'[{name:9s}] Dumping...', ncols=80):
-        _dump_result(res, calc_type='scf', recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
+    print(f"[{name:9s}] Unique {len(scf_qr)}")
+    for res in tqdm(scf_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
+        _dump_result(res, calc_type="scf", recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
     print()
 
-    name = 'BANDS'
-    print(f'[{name:9s}] Querying for calculations...')
-    bands_qr = _bands_query(zero_shot_qr)
-    print(f'[{name:9s}] Found {len(bands_qr)}')
-    print(f'[{name:9s}] De-duplicating...')
+    name = "BANDS"
+    print(f"[{name:9s}] Querying for calculations...")
+    bands_qr = _bands_query(single_shot_qr)
+    print(f"[{name:9s}] Found {len(bands_qr)}")
+    print(f"[{name:9s}] De-duplicating...")
     bands_qr = _deduplicate(bands_qr)
-    print(f'[{name:9s}] Unique {len(bands_qr)}')
-    for res in tqdm(bands_qr, desc=f'[{name:9s}] Dumping...', ncols=80):
-        _dump_result(res, calc_type='bands', recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
+    print(f"[{name:9s}] Unique {len(bands_qr)}")
+    for res in tqdm(bands_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
+        _dump_result(res, calc_type="bands", recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
 
-    return zero_shot_qr, scf_qr, bands_qr
+    return single_shot_qr, scf_qr, bands_qr
+
+
 # %%
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
