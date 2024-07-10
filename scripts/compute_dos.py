@@ -14,7 +14,8 @@ N_ENERGIES = 512
 
 
 def _featurize_fermi_centered(dir_, material, e_min, e_max):
-    energies = np.linspace(material.bands.fermi_energy + e_min, material.bands.fermi_energy + e_max, N_ENERGIES)
+    fermi_energy = material.bands.fermi_energy
+    energies = np.linspace(fermi_energy + e_min, fermi_energy + e_max, N_ENERGIES)
     dos = material.bands.compute_smeared_dos(
         energies=energies, smearing_type=SMEARING_TYPE, smearing_width=SMEARING_WIDTH
     )
@@ -23,7 +24,7 @@ def _featurize_fermi_centered(dir_, material, e_min, e_max):
         dir_ / f"dos_fermi_centered_{SMEARING_TYPE}_{SMEARING_WIDTH}_{feature_id}.npz",
         energies=energies,
         dos=dos,
-        fermi_energy=material.bands.fermi_energy,
+        fermi_energy=fermi_energy,
         vbm=material.bands.vbm,
         cbm=material.bands.cbm,
     )
@@ -96,13 +97,47 @@ def _featurize_fermi_scissor(dir_, material, vbm_e_lims, cbm_e_lims):
     )
 
 
+def _featurize_vfc_concat(dir_, material, vbm_e_lims, fermi_e_lims, cbm_e_lims):
+    fermi_energy = material.bands.fermi_energy
+    if material.bands.is_insulating():
+        vbm = material.bands.vbm
+        cbm = material.bands.cbm
+    else:
+        vbm = fermi_energy
+        cbm = fermi_energy
+    energies = np.concatenate(
+        [
+            np.linspace(vbm + vbm_e_lims[0], vbm + vbm_e_lims[1], N_ENERGIES // 3),
+            np.linspace(
+                fermi_energy + fermi_e_lims[0],
+                fermi_energy + fermi_e_lims[1],
+                N_ENERGIES // 3,
+            ),
+            np.linspace(cbm + cbm_e_lims[0], cbm + cbm_e_lims[1], N_ENERGIES // 3),
+        ]
+    )
+    dos = material.bands.compute_smeared_dos(
+        energies=energies, smearing_type=SMEARING_TYPE, smearing_width=SMEARING_WIDTH
+    )
+    feature_id = f"{vbm_e_lims[0]:0.2f}_{vbm_e_lims[1]:0.2f}_{fermi_e_lims[0]:0.2f}_{fermi_e_lims[1]:0.2f}_{cbm_e_lims[0]:0.2f}_{cbm_e_lims[1]:0.2f}_{N_ENERGIES}"
+    np.savez_compressed(
+        dir_ / f"dos_vfc_concat_{SMEARING_TYPE}_{SMEARING_WIDTH}_{feature_id}.npz",
+        energies=energies,
+        dos=dos,
+        fermi_energy=fermi_energy,
+        vbm=vbm,
+        cbm=cbm,
+    )
+
+
 def _featurize_separate_files(dir_):
     material = sorep.MaterialData.from_dir(dir_)
-    _featurize_fermi_centered(dir_, material, -5, +5)
-    _featurize_vbm_centered(dir_, material, -2, +6)
-    _featurize_cbm_centered(dir_, material, -6, +2)
-    _featurize_fermi_scissor(dir_, material, (-2, +3 * SMEARING_WIDTH), (-3 * SMEARING_WIDTH, +2))
-    _featurize_fermi_scissor(dir_, material, (-2, +2), (-2, +2))
+    # _featurize_fermi_centered(dir_, material, -5, +5)
+    # _featurize_vbm_centered(dir_, material, -2, +6)
+    # _featurize_cbm_centered(dir_, material, -6, +2)
+    # _featurize_fermi_scissor(dir_, material, (-2, +3 * SMEARING_WIDTH), (-3 * SMEARING_WIDTH, +2))
+    # _featurize_fermi_scissor(dir_, material, (-2, +2), (-2, +2))
+    _featurize_vfc_concat(dir_, material, (-1, +1), (-1, +1), (-1, +1))
 
 
 # %%
