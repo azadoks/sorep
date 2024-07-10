@@ -98,7 +98,7 @@ def _featurize_fermi_scissor(dir_, material, vbm_e_lims, cbm_e_lims):
 
 def _featurize_separate_files(dir_):
     material = sorep.MaterialData.from_dir(dir_)
-    # _featurize_fermi_centered(dir_, material, -5, +5)
+    _featurize_fermi_centered(dir_, material, -5, +5)
     _featurize_vbm_centered(dir_, material, -2, +6)
     _featurize_cbm_centered(dir_, material, -6, +2)
     _featurize_fermi_scissor(dir_, material, (-2, +3 * SMEARING_WIDTH), (-3 * SMEARING_WIDTH, +2))
@@ -109,7 +109,7 @@ def _featurize_separate_files(dir_):
 def main():
     dirs = list(pl.Path("../data/mc3d/").glob("*/single_shot")) + list(pl.Path("../data/mc3d/").glob("*/scf"))
     pbar = tqdm(dirs, desc="Compute SOREP features", ncols=80)
-    with Pool(processes=6, maxtasksperchild=1) as p:
+    with Pool(processes=12, maxtasksperchild=1) as p:
         p.map(_featurize_separate_files, pbar)
 
 

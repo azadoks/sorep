@@ -38,11 +38,11 @@ def plot_yield(database, calculation_type):
             "c": "k",
             "marker": ".",
         },
-        # "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512": {
-        #     "label": r"$E_{F}^{\mathrm{scissor}} \pm 2 \mathrm{eV}$ v2",
-        #     "c": "tab:orange",
-        #     "marker": ".",
-        # },
+        "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512": {
+            "label": r"$E_{F}^{\mathrm{scissor}} \pm 2 \mathrm{eV}$ v2",
+            "c": "tab:orange",
+            "marker": ".",
+        },
     }
 
     with plt.style.context("../sorep.mplstyle"):
@@ -72,7 +72,7 @@ def plot_yield(database, calculation_type):
         ax.set_xscale("log")
         ax.set_xlabel(r"$f_{\mathrm{train}}$")
         ax.set_ylabel("Yield (TCM / calculation)")
-        ax.legend(handles=handles, loc=[0.1, 0.1])
+        ax.legend(handles=handles, loc=[0.1, 0.05])
 
         # fig.tight_layout()
     return fig
@@ -106,11 +106,11 @@ def plot_balanced_accuracy(database, calculation_type):
             "c": "k",
             "marker": ".",
         },
-        # "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512": {
-        #     "label": r"$E_{F}^{\mathrm{scissor}} \pm 2 \mathrm{eV}$ v2",
-        #     "c": "grey",
-        #     "marker": ".",
-        # },
+        "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512": {
+            "label": r"$E_{F}^{\mathrm{scissor}} \pm 2 \mathrm{eV}$ v2",
+            "c": "tab:orange",
+            "marker": ".",
+        },
     }
 
     with plt.style.context("../sorep.mplstyle"):
@@ -140,7 +140,7 @@ def plot_balanced_accuracy(database, calculation_type):
         ax.set_xscale("log")
         ax.set_xlabel(r"$f_{\mathrm{train}}$")
         ax.set_ylabel("Balanced accuracy")
-        ax.legend(handles=handles, loc=[0.5, 0.1])
+        ax.legend(handles=handles, loc=[0.55, 0.02])
 
         # fig.tight_layout()
     return fig
@@ -153,131 +153,99 @@ plot_balanced_accuracy(DATABASE, CALCULATION_TYPE)
 def plot_feature_importances(database, calculation_type, train_size=0.5, axes=None):
     feature_kwargs = {
         "dos_vbm_centered_gauss_0.05_-2.00_6.00_512": {
-            "label": r"$E_{\mathrm{VBM}}(-2,+6) \mathrm{eV}$",
-            "c": "#aa0000",
-            "marker": ".",
+            "title": r"$E_{\mathrm{VBM}}(-2,+6) \mathrm{eV}$",
+            "line_kwargs": {"c": "#aa0000"},
+            "fill_kwargs": {"color": "#aa0000", "alpha": 0.3},
+            "line_x": np.linspace(-2, 6, 512),
+            "xticks": [-2, 0, 2, 4, 6],
+            "xtick_labels": [-2, r"$E_{\mathrm{VBM}}$", 2, 4, 6],
+            "vlines": [{"x": 0.5, "label": r"$E_{g}=0.5$", "c": "grey", "ls": ":"}],
         },
-        "dos_fermi_scissor_gauss_0.05_-2.00_0.15_-0.15_2.00_512": {
-            "label": r"$E_{F}^{\mathrm{scissor}} \pm 2 \mathrm{eV}$",
-            "c": "#000080",
-            "marker": ".",
-        },
-        "dos_fermi_centered_gauss_0.05_-5.00_5.00_512": {
-            "label": r"$E_{F} \pm 5 \mathrm{eV}$",
-            "c": "#008000",
-            "marker": ".",
-        },
-        "dos_cbm_centered_gauss_0.05_-6.00_2.00_512": {
-            "label": r"$E_{\mathrm{CBM}} (-6,+2) \mathrm{eV}$",
-            "c": "k",
-            "marker": ".",
-        },
-        # "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512": {
-        #     "label": r"$E_{F}^{\mathrm{scissor}} \pm 2 \mathrm{eV}$ v2",
-        #     "c": "grey",
-        #     "marker": ".",
+        # "dos_fermi_scissor_gauss_0.05_-2.00_0.15_-0.15_2.00_512": {
+        #     "title": r"$E_{F}^{\mathrm{scissor}} \pm 2 \mathrm{eV}$",
+        #     "line_kwargs": {"c": "#000080"},
+        #     "fill_kwargs": {"color": "#000080", "alpha": 0.3},
+        #     "line_x": np.linspace(-2.15, 2.15, 512),
+        #     "xticks": [-2, -1, -0.15, 0.15, 1, 2],
+        #     "xtick_labels": [-2, -1, r"$E_{\mathrm{VBM}}$", r"$E_{\mathrm{CBM}}$", 1, 2],
+        #     "xticks_kwargs": {"rotation": 90},
         # },
-    }
-
-    x = {
-        "dos_vbm_centered_gauss_0.05_-2.00_6.00_512": np.linspace(-2, 6, 512),
-        "dos_fermi_scissor_gauss_0.05_-2.00_0.15_-0.15_2.00_512": np.arange(512) - 256,
-        "dos_fermi_centered_gauss_0.05_-5.00_5.00_512": np.linspace(-5, 5, 512),
-        "dos_cbm_centered_gauss_0.05_-6.00_2.00_512": np.linspace(-6, 2, 512),
-    }
-
-    xticks = {
-        "dos_vbm_centered_gauss_0.05_-2.00_6.00_512": {
-            "xticks": [-2, 0, 0.35, 0.5, 0.65, +6],
-            "xtick_labels": [
-                r"$E_{\mathrm{VBM}} - 2 \mathrm{eV}$",
-                r"$E_{\mathrm{VBM}}$",
-                "",
-                r"$E_{g}=0.5$",
-                "",
-                r"$E_{\mathrm{VBM}} + 6 \mathrm{eV}$",
-            ],
-        },
-        "dos_fermi_scissor_gauss_0.05_-2.00_0.15_-0.15_2.00_512": {
-            "xticks": [-256, -19, 0, 19, 255],
-            "xtick_labels": [
-                r"$E_{F} - 2 \mathrm{eV}$",
-                r"$E_{\mathrm{VBM}}$",
-                "",
-                r"$E_{\mathrm{CBM}}$",
-                r"$E_{F} + 2 \mathrm{eV}$",
+        "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512": {
+            "title": r"$E_{\mathrm{VBM}} \pm 2 \mathrm{eV} || E_{\mathrm{CBM}} \pm 2 \mathrm{eV}$",
+            "line_kwargs": {"c": "#000080"},
+            "fill_kwargs": {"color": "#000080", "alpha": 0.3},
+            "line_x": np.linspace(-4, 4, 512),
+            "xticks": [-4, -2, 0, 2, 4],
+            "xtick_labels": [-2, r"$E_{\mathrm{VBM}}$", r"$\pm$2", r"$E_{\mathrm{CBM}}$", 2],
+            "vlines": [
+                {"x": -1.5, "label": r"$E_{g}=0.5$", "c": "grey", "ls": ":"},
+                {"x": 1.5, "c": "grey", "ls": ":"},
             ],
         },
         "dos_fermi_centered_gauss_0.05_-5.00_5.00_512": {
-            "xticks": [-5, -0.25, 0, +0.25, +5],
-            "xtick_labels": [
-                r"$E_{F} - 5 \mathrm{eV}$",
-                r"",
-                r"$E_{F}$",
-                r"",
-                r"$E_{F} + 5 \mathrm{eV}$",
+            "title": r"$E_{F} \pm 5 \mathrm{eV}$",
+            "line_kwargs": {"c": "#008000"},
+            "fill_kwargs": {"color": "#008000", "alpha": 0.3},
+            "line_x": np.linspace(-5, 5, 512),
+            "xticks": [-5, -2.5, 0, 2.5, 5],
+            "xtick_labels": [-5, -2.5, r"$E_{F}$", 2.5, 5],
+            "vlines": [
+                {"x": -0.25, "label": r"$E_{g}=0.5$", "c": "grey", "ls": ":"},
+                {"x": 0.25, "c": "grey", "ls": ":"},
             ],
         },
         "dos_cbm_centered_gauss_0.05_-6.00_2.00_512": {
-            "xticks": [-6, -0.65, -0.5, -0.35, 0, +2],
-            "xtick_labels": [
-                r"$E_{\mathrm{CBM}} - 6 \mathrm{eV}$",
-                "",
-                r"$E_{g}=0.5$",
-                "",
-                r"$E_{\mathrm{CBM}}$",
-                r"$E_{\mathrm{CBM}} + 2 \mathrm{eV}$",
-            ],
+            "title": r"$E_{\mathrm{CBM}} (-6,+2) \mathrm{eV}$",
+            "line_kwargs": {"c": "k"},
+            "fill_kwargs": {"color": "k", "alpha": 0.3},
+            "line_x": np.linspace(-6, 2, 512),
+            "xticks": [-6, -4, -2, 0, 2],
+            "xtick_labels": [-6, -4, -2, r"$E_{\mathrm{CBM}}$", 2],
+            "vlines": [{"x": -0.5, "label": r"$E_{g}=0.5$", "c": "grey", "ls": ":"}],
         },
     }
 
     with plt.style.context("../sorep.mplstyle"):
         if axes is None:
-            fig, axes = plt.subplots(2, 2, dpi=300, figsize=(9, 6), sharey=True)
+            fig, axes = plt.subplots(2, 2, dpi=300, figsize=(4.5, 4), sharey=True)
             axes = axes.flatten()
         else:
             fig = plt.gcf()
 
-        handles = []
-        for ax, (feature_id, kwargs) in zip(axes, feature_kwargs.items()):
-            metrics = pd.read_json(pl.Path(f"../data/{DATABASE}_metrics_{calculation_type}_{feature_id}.json"))
-            gb = metrics[metrics.train_size == train_size]
-            feature_importances_mean = np.array(gb["feature_importances"].to_list()).mean(axis=0)
-            kwargs.pop("marker")
-            errorbar = ax.plot(x[feature_id], feature_importances_mean, **kwargs)[0]
-            handles.append(errorbar)
+        for i, (ax, (feature_id, kwargs)) in enumerate(zip(axes, feature_kwargs.items())):
+            metrics = pd.read_json(pl.Path(f"../data/{database}_metrics_{calculation_type}_{feature_id}.json"))
 
-            ax.grid(True)
-            ax.tick_params(axis="x", which="both", top=False)
-            ax.tick_params(axis="x", which="minor", bottom=False)
-            ax.set_xlabel("Feature")
-            ax.set_xticks(xticks[feature_id]["xticks"], xticks[feature_id]["xtick_labels"], rotation=45)
-            ax.set_ylabel("Importance")
+            feature_importances = np.array(metrics[metrics.train_size == train_size]["feature_importances"].to_list())
+            feature_importances_mean = feature_importances.mean(axis=0)
+            feature_importances_std = feature_importances.std(axis=0)
+
+            ax.set_title(kwargs["title"])
+            ax.plot(kwargs["line_x"], feature_importances_mean, **kwargs["line_kwargs"])[0]
+
+            ax.fill_between(
+                kwargs["line_x"],
+                feature_importances_mean - feature_importances_std,
+                feature_importances_mean + feature_importances_std,
+                **kwargs["fill_kwargs"],
+            )
+
+            for vline in kwargs.get("vlines", []):
+                ax.axvline(**vline)
+
+            ax.grid(visible=True, which="major", axis="both")
+            ax.set_xticks(kwargs["xticks"], kwargs["xtick_labels"], **kwargs.get("xticks_kwargs", {}))
+            if i % 2 == 0:
+                ax.set_ylabel("Feature importance")
+            if i > 1:
+                ax.set_xlabel("Feature")
             ax.set_yticklabels([])
-            # ax.legend(handles=handles, loc=[0.05, 0.5])
+            ax.legend()
+        fig.tight_layout()
 
     return fig
 
 
-plot_feature_importances(DATABASE, CALCULATION_TYPE, train_size=0.5)
-# %%
-with open("../data/mc3d_features_single_shot_dos_vbm_centered_gauss_0.05_-2.00_6.00_512.npz", "rb") as fp:
-    vbm_features = dict(np.load(fp))
-    vbm_x = np.linspace(-2, 6, 512)
-
-with open("../data/mc3d_features_single_shot_dos_cbm_centered_gauss_0.05_-6.00_2.00_512.npz", "rb") as fp:
-    cbm_features = dict(np.load(fp))
-    cbm_x = np.linspace(-6, 2, 512)
-
-with open("../data/mc3d_features_single_shot_dos_fermi_centered_gauss_0.05_-5.00_5.00_512.npz", "rb") as fp:
-    fermi_features = dict(np.load(fp))
-    fermi_x = np.linspace(-5, 5, 512)
-# %%
-i = 0
-fig, ax = plt.subplots()
-ax.plot(vbm_x, vbm_features["features"][i], label="VBM")
-# ax.plot(cbm_x, cbm_features["features"][i], label="CBM")
-ax.plot(fermi_x, fermi_features["features"][i], label="FERMI")
-ax.legend()
+fig = plot_feature_importances(DATABASE, CALCULATION_TYPE, train_size=0.5)
+fig.savefig("../plots/feature_importances.pdf", bbox_inches="tight")
 fig
 # %%

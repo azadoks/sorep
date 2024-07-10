@@ -116,7 +116,9 @@ def load_data(data_dir: os.PathLike, database: str, calculation_type: str, featu
     return (X, X_val, y, y_val)
 
 
-def get_random_states(labels, train_sizes, min_populations=None):
+def get_random_states(labels, train_sizes, min_populations=None, seed=9997):
+    rs = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(seed)))
+
     if min_populations is None:
         min_populations = {k: 0 for k in np.unique(y)}
 
@@ -124,7 +126,7 @@ def get_random_states(labels, train_sizes, min_populations=None):
     for train_size in train_sizes:
         do_generate = True
         while do_generate:
-            random_state = np.random.randint(low=0, high=2**32 - 1)
+            random_state = rs.randint(low=0, high=2**32 - 1)
             train, test = skms.train_test_split(labels, train_size=train_size, random_state=random_state)
             if all(np.sum(train == k) >= v for k, v in min_populations.items()) and all(
                 np.sum(test == k) >= v for k, v in min_populations.items()
@@ -174,7 +176,36 @@ FEATURE_IDS = [
     "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512",
 ]
 # TRAIN_SIZES = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
-TRAIN_SIZES = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5]
+TRAIN_SIZES = [
+    0.001,
+    0.002,
+    0.003,
+    0.004,
+    0.005,
+    0.006,
+    0.007,
+    0.008,
+    0.009,
+    0.01,
+    0.02,
+    0.03,
+    0.04,
+    0.05,
+    0.06,
+    0.07,
+    0.08,
+    0.09,
+    0.1,
+    0.15,
+    0.2,
+    0.25,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+]
 N_REPEATS = 30
 
 
@@ -188,7 +219,7 @@ def main():
     _train_evaluate = partial(train_evaluate, train_sizes=train_sizes, random_states=random_states)
 
     feature_id_pbar = tqdm(FEATURE_IDS, ncols=120)
-    with Pool(processes=6, maxtasksperchild=1) as p:
+    with Pool(processes=12, maxtasksperchild=1) as p:
         p.map(_train_evaluate, feature_id_pbar)
 
 
