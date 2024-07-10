@@ -104,20 +104,6 @@ class Gaussian(Smearing):
         )
         return -d2_dx2  # pylint: disable=invalid-unary-operand-type
 
-    # def occupation(self, x: npt.ArrayLike) -> npt.ArrayLike:
-    #     x = self._scale(x)
-    #     return 0.5 * sp.special.erfc(x)
-
-    # def occupation_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
-    #     x = self._scale(x)
-    #     dx = -1.0 / np.sqrt(np.pi) * np.exp(-(x**2))
-    #     return -dx
-
-    # def occupation_2nd_derivative(self, x: npt.ArrayLike) -> npt.ArrayLike:
-    #     x = self._scale(x)
-    #     d2_dx2 = 2.0 * x / np.sqrt(np.pi) * np.exp(-(x**2))
-    #     return -d2_dx2
-
 
 class Cold(Smearing):
     """Marzari-Vanderbilt-DeVita-Payne (cold) smearing."""

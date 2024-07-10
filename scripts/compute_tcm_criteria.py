@@ -60,6 +60,9 @@ def _compute_criteria(dir_):
             effective_masses.append(
                 {
                     "segment": i,
+                    "segment_length": len(segment.linear_k),
+                    "segment_start_label": segment.start_label,
+                    "segment_stop_label": segment.stop_label,
                     "contains_cbm": bool(np.isclose(segment.bands, cbm).any()),
                     "contains_vbm": bool(np.isclose(segment.bands, vbm).any()),
                     "integral_electron": integral_effective_masses["electron"],

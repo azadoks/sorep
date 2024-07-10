@@ -100,9 +100,11 @@ class BandStructure:
         weights /= total_weight
 
         # Fix k-labels
-        if labels and label_numbers:
+        if labels is not None:
             labels = list(labels)
+        if label_numbers is not None:
             label_numbers = list(label_numbers)
+        if labels and label_numbers:
             # If the first k-point does not have a label, give it a placeholder label, and
             # add its index to the indices so that it can start a segment.
             if label_numbers[0] != 0:
