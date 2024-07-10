@@ -132,11 +132,11 @@ def _featurize_vfc_concat(dir_, material, vbm_e_lims, fermi_e_lims, cbm_e_lims):
 
 def _featurize_separate_files(dir_):
     material = sorep.MaterialData.from_dir(dir_)
-    # _featurize_fermi_centered(dir_, material, -5, +5)
-    # _featurize_vbm_centered(dir_, material, -2, +6)
-    # _featurize_cbm_centered(dir_, material, -6, +2)
-    # _featurize_fermi_scissor(dir_, material, (-2, +3 * SMEARING_WIDTH), (-3 * SMEARING_WIDTH, +2))
-    # _featurize_fermi_scissor(dir_, material, (-2, +2), (-2, +2))
+    _featurize_fermi_centered(dir_, material, -5, +5)
+    _featurize_vbm_centered(dir_, material, -2, +6)
+    _featurize_cbm_centered(dir_, material, -6, +2)
+    _featurize_fermi_scissor(dir_, material, (-2, +3 * SMEARING_WIDTH), (-3 * SMEARING_WIDTH, +2))
+    _featurize_fermi_scissor(dir_, material, (-2, +2), (-2, +2))
     _featurize_vfc_concat(dir_, material, (-1, +1), (-1, +1), (-1, +1))
 
 

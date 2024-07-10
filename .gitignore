@@ -164,6 +164,8 @@ cython_debug/
 # Data
 data/
 data
+plots/
+plot
 
 # Poetry
 poetry.lock
