@@ -169,11 +169,12 @@ DATA_DIR = "../data/"
 DATASET = "mc3d"
 CALCULATION_TYPE = "single_shot"
 FEATURE_IDS = [
-    "dos_cbm_centered_gauss_0.05_-6.00_2.00_512",
-    "dos_fermi_centered_gauss_0.05_-5.00_5.00_512",
-    "dos_vbm_centered_gauss_0.05_-2.00_6.00_512",
-    "dos_fermi_scissor_gauss_0.05_-2.00_0.15_-0.15_2.00_512",
-    "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512",
+    # "dos_cbm_centered_gauss_0.05_-6.00_2.00_512",
+    # "dos_fermi_centered_gauss_0.05_-5.00_5.00_512",
+    # "dos_vbm_centered_gauss_0.05_-2.00_6.00_512",
+    # "dos_fermi_scissor_gauss_0.05_-2.00_0.15_-0.15_2.00_512",
+    # "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512",
+    "dos_vfc_concat_gauss_0.05_-1.00_1.00_-1.00_1.00_-1.00_1.00_512"
 ]
 TRAIN_SIZES = [
     0.001,

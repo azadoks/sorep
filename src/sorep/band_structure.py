@@ -141,7 +141,7 @@ class BandStructure:
         )
 
     @classmethod
-    def from_npz_xyz_metadata(
+    def from_files(
         cls, npz_path: os.PathLike, xyz_path: os.PathLike, json_path: ty.Optional[os.PathLike] = None
     ) -> None:
         """Load a band structure from an NPZ file containing arrays, an extended XYZ file containing a
@@ -404,6 +404,8 @@ class BandStructure:
             return None
         if self.fermi_energy >= np.max(self.bands):
             return np.max(self.bands)
+        if self.is_metallic():
+            return self.fermi_energy
         # Mask the conduction bands and find the maximum of the rest of the bands,
         # i.e. the valence bands
         return np.max(self.bands[self.bands <= self.fermi_energy])
@@ -430,6 +432,8 @@ class BandStructure:
             return None
         if self.fermi_energy >= np.max(self.bands):
             return np.max(self.bands)
+        if self.is_metallic():
+            return self.fermi_energy
         # See `vbm`
         return np.min(self.bands[self.bands >= self.fermi_energy])
 

@@ -19,7 +19,7 @@ def bandstructure(request):
     with open(dir_.joinpath("metadata.json"), "r", encoding="utf-8") as file:
         metadata = json.load(file)
     return (
-        sorep.BandStructure.from_npz_xyz_metadata(
+        sorep.BandStructure.from_files(
             dir_.joinpath("bands.npz"), dir_.joinpath("structure.xyz"), dir_.joinpath("metadata.json")
         ),
         metadata["smearing_type"],

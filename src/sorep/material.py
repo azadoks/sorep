@@ -62,7 +62,7 @@ class MaterialData:
         """
         with open(structure_path, "r", encoding="utf-8") as fp:
             atoms = read(fp, index=0)
-        bands = BandStructure.from_npz_xyz_metadata(bands_path, structure_path, metadata_path)
+        bands = BandStructure.from_files(bands_path, structure_path, metadata_path)
         with open(metadata_path, "r", encoding="utf-8") as fp:
             metadata = json.load(fp)
         return cls(atoms, bands, metadata)
