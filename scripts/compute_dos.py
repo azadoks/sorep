@@ -1,228 +1,23 @@
 # %%
+from collections.abc import MutableMapping
+from functools import partial
 from multiprocessing import Pool
 import os
 import pathlib as pl
-import typing as ty
 
 import h5py
 import numpy as np
-import numpy.typing as npt
 from tqdm import tqdm
 
 import sorep
-
-
-# %%
-def featurize(
-    bands: sorep.BandStructure,
-    center: float,
-    e_min: float,
-    e_max: float,
-    n_energies: int,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-) -> tuple[npt.ArrayLike, npt.ArrayLike]:
-    """Compute DOS features for a given band structure.
-
-    Energies are sampled linearly between `center + e_min` and `center + e_max`.
-
-    Args:
-        bands (sorep.BandStructure): Band structure object.
-        center (float): Center of the energies.
-        e_min (float): Minimum of the energy range around the center.
-        e_max (float): Maximum of the energy range around the center.
-        n_energies (int): Number of energies.
-        smearing_type (ty.Union[str, int]): Smearing type.
-        smearing_width (float): Smearing width.
-
-    Returns:
-        tuple[npt.ArrayLike, npt.ArrayLike]: Energies and DOS.
-    """
-    energies = np.linspace(center + e_min, center + e_max, n_energies)
-    dos = bands.compute_smeared_dos(energies=energies, smearing_type=smearing_type, smearing_width=smearing_width)
-    return energies, dos
-
-
-def fermi_centered(
-    material: sorep.MaterialData,
-    e_min: float,
-    e_max: float,
-    n_energies: int,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-) -> tuple[npt.ArrayLike, npt.ArrayLike]:
-    """Compute DOS features centered around the Fermi energy.
-
-    Args:
-        material (sorep.MaterialData): Material data object.
-        center (float): Center of the energies.
-        e_min (float): Minimum of the energy range around the center.
-        e_max (float): Maximum of the energy range around the center.
-        n_energies (int): Number of energies.
-        smearing_type (ty.Union[str, int]): Smearing type.
-        smearing_width (float): Smearing width.
-
-    Returns:
-        tuple[npt.ArrayLike, npt.ArrayLike]: Energies and DOS.
-    """
-    return featurize(
-        material.bands, material.bands.fermi_energy, e_min, e_max, n_energies, smearing_type, smearing_width
-    )
-
-
-def vbm_centered(
-    material: sorep.MaterialData,
-    e_min: float,
-    e_max: float,
-    n_energies: int,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-) -> tuple[npt.ArrayLike, npt.ArrayLike]:
-    """Compute DOS features centered around the valence band maximum (VBM).
-    For metals, the Fermi energy is used as the center.
-
-    Args:
-        material (sorep.MaterialData): Material data object.
-        center (float): Center of the energies.
-        e_min (float): Minimum of the energy range around the center.
-        e_max (float): Maximum of the energy range around the center.
-        n_energies (int): Number of energies.
-        smearing_type (ty.Union[str, int]): Smearing type.
-        smearing_width (float): Smearing width.
-
-    Returns:
-        tuple[npt.ArrayLike, npt.ArrayLike]: Energies and DOS.
-    """
-    return featurize(material.bands, material.bands.vbm, e_min, e_max, n_energies, smearing_type, smearing_width)
-
-
-def cbm_centered(
-    material: sorep.MaterialData,
-    e_min: float,
-    e_max: float,
-    n_energies: int,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-) -> tuple[npt.ArrayLike, npt.ArrayLike]:
-    """Compute DOS features centered around the conduction band minimum (CBM).
-    For metals, the Fermi energy is used as the center.
-
-    Args:
-        material (sorep.MaterialData): Material data object.
-        center (float): Center of the energies.
-        e_min (float): Minimum of the energy range around the center.
-        e_max (float): Maximum of the energy range around the center.
-        n_energies (int): Number of energies.
-
-    Returns:
-        tuple[npt.ArrayLike, npt.ArrayLike]: Energies and DOS.
-    """
-    return featurize(material.bands, material.bands.cbm, e_min, e_max, n_energies, smearing_type, smearing_width)
-
-
-def vbm_cbm_concatenated(
-    material: sorep.MaterialData,
-    vbm_params: dict[str, ty.Union[float, int]],
-    cbm_params: dict[str, ty.Union[float, int]],
-) -> tuple[npt.ArrayLike, npt.ArrayLike]:
-    """Compute the concatenation of DOS features centered around the VBM and CBM.
-
-    Args:
-        material (sorep.MaterialData): Material data object.
-        vbm_params (dict[str, ty.Union[float, int]]): kwargs passed to `vbm_centered`.
-        cbm_params (dict[str, ty.Union[float, int]]): kwargs passed to `cbm_centered`.
-
-    Returns:
-        tuple[npt.ArrayLike, npt.ArrayLike]: Energies and DOS.
-    """
-    bands = material.bands
-    vbm = bands.vbm
-    cbm = bands.cbm
-    vbm_energies, vbm_dos = featurize(bands, vbm, **vbm_params)
-    cbm_energies, cbm_dos = featurize(bands, cbm, **cbm_params)
-    energies = np.concatenate([vbm_energies, cbm_energies])
-    dos = np.concatenate([vbm_dos, cbm_dos], axis=1)
-    return energies, dos
-
-
-def vbm_fermi_cbm_concatenated(
-    material: sorep.MaterialData,
-    vbm_params: dict[str, ty.Union[float, int]],
-    fermi_params: dict[str, ty.Union[float, int]],
-    cbm_params: dict[str, ty.Union[float, int]],
-) -> tuple[npt.ArrayLike, npt.ArrayLike]:
-    """Compute the concatenation of DOS features centered around the VBM, Fermi energy, and CBM.
-
-    Args:
-        material (sorep.MaterialData): Material data object.
-        vbm_params (dict[str, ty.Union[float, int]]): kwargs passed to `vbm_centered`.
-        fermi_params (dict[str, ty.Union[float, int]]): kwargs passed to `fermi_centered`.
-        cbm_params (dict[str, ty.Union[float, int]]): kwargs passed to `cbm_centered`.
-
-    Returns:
-        tuple[npt.ArrayLike, npt.ArrayLike]: Energies and DOS.
-    """
-    bands = material.bands
-    fermi_energy = bands.fermi_energy
-    vbm = bands.vbm
-    cbm = bands.cbm
-    vbm_energies, vbm_dos = featurize(bands, vbm, **vbm_params)
-    fermi_energies, fermi_dos = featurize(bands, fermi_energy, **fermi_params)
-    cbm_energies, cbm_dos = featurize(bands, cbm, **cbm_params)
-    energies = np.concatenate([vbm_energies, fermi_energies, cbm_energies])
-    dos = np.concatenate([vbm_dos, fermi_dos, cbm_dos], axis=1)
-    return energies, dos
-
-
-def get_feature_id(featurization: dict) -> str:
-    def _get_feature_id(e_min, e_max, n_energies, smearing_type, smearing_width):
-        return f"{e_min:.2f}_{e_max:.2f}_{n_energies}_{smearing_type}_{smearing_width:.2f}"
-
-    name = featurization["function"].__name__
-    if name in ("vbm_centered", "fermi_centered", "cbm_centered"):
-        return _get_feature_id(**featurization["params"])
-    else:
-        sub_ids = []
-        for key in ("vbm_params", "fermi_params", "cbm_params"):
-            params = featurization["params"].get(key)
-            if params:
-                sub_ids.append(_get_feature_id(**params))
-        return "_".join(sub_ids)
-
-
-def featurize_h5(dir_):
-    material = sorep.MaterialData.from_dir(dir_)
-    material_id = dir_.parent.name
-    calculation_type = dir_.name
-    mode = "w" if OVERWRITE_ALL else "a"
-    with h5py.File(str(dir_ / "features.h5"), mode) as fp:
-        for featurization in FEATURIZATIONS:
-            featurization_key = f"{material_id}/{calculation_type}/{featurization['function'].__name__}"
-            featurization_group = (
-                fp[featurization_key] if featurization_key in fp else fp.create_group(featurization_key)
-            )
-            feature_id = get_feature_id(featurization)
-            if feature_id in featurization_group and not OVERWRITE_NEW:
-                continue
-            energies, dos = featurization["function"](material, **featurization["params"])
-            feature_group = (
-                featurization_group[feature_id]
-                if feature_id in featurization_group
-                else featurization_group.create_group(feature_id)
-            )
-            if "energies" not in feature_group and "dos" not in feature_group:
-                feature_group["energies"] = energies
-                feature_group["dos"] = dos
-            else:
-                feature_group["energies"][...] = energies
-                feature_group["dos"][...] = dos
-
+from sorep.features import *
 
 # %%
 OVERWRITE_NEW = False
 OVERWRITE_ALL = False
 SMEARING_TYPE = "gauss"
 SMEARING_WIDTH = 0.05  # eV
+FEATURE_DTYPE = "float32"
 
 FEATURIZATIONS = [
     {
@@ -322,13 +117,98 @@ FEATURIZATIONS = [
 ]
 
 
-def main():
-    dirs = list(pl.Path("../data/mc3d/").glob("*/single_shot")) + list(pl.Path("../data/mc3d/").glob("*/scf"))
-    pbar = tqdm(dirs, desc="Compute SOREP features", ncols=80)
+def _flatten(dictionary, parent_key="", separator="__"):
+    items = []
+    for key, value in dictionary.items():
+        new_key = parent_key + separator + key if parent_key else key
+        if isinstance(value, MutableMapping):
+            items.extend(_flatten(value, new_key, separator=separator).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)
+
+
+def load_dirs(dirs: list[os.PathLike]):
+    """Material loader generator.
+
+    Args:
+        dirs (list[os.PathLike]): Material directories.
+
+    Yields:
+        sorep.MaterialData: Material data object.
+    """
+    for dir_ in dirs:
+        yield sorep.MaterialData.from_dir(dir_)
+
+
+def featurize_dirs(dirs: list[os.PathLike], featurization: dict) -> dict:
+    """Apply the featurization described in `featurization` to all materials in `dirs`.
+
+    Args:
+        dirs (list[os.PathLike]): Directories containing material files.
+        featurization (dict): Featurization method and parameters.
+
+    Returns:
+        dict: Dictionary containing material ids and features.
+    """
+    result = {}
+    # HDF5 doesn't like numpy 'U' strings, so use Python strings
+    result["material_id"] = [dir_.parent.name for dir_ in dirs]
+    # This is a generator so we don't need to load all the materials at once
+    materials = load_dirs(dirs)
+    # pmap requires that the function is pickleable and has one argument; partial gets us both
+    _featurize = partial(featurization["function"], **featurization["params"])
+    pbar = tqdm(materials, desc="Compute SOREP features", ncols=80, total=len(dirs))
     with Pool(processes=12, maxtasksperchild=1) as p:
-        p.map(featurize_h5, pbar)
-    # for dir_ in pbar:
-    #     featurize_h5(dir_)
+        result["features"] = np.array(p.map(_featurize, pbar))
+    return result
+
+
+def _equal_params_existing(group, params):
+    for subgroup_key in group:
+        subgroup_params = dict(group[subgroup_key].attrs)
+        if all(subgroup_params.get(param_key) == param_value for (param_key, param_value) in _flatten(params).items()):
+            return subgroup_key
+    return None
+
+
+def main():
+    for calculation_type in ["single_shot", "scf"]:
+        dirs = list(pl.Path("../data/mc3d/").glob(f"*/{calculation_type}"))
+        print(f"Processing {calculation_type} calculations")
+        for featurization in FEATURIZATIONS:
+            feature_method = featurization["function"].__name__
+            attrs = _flatten(featurization["params"])
+            mode = "w" if OVERWRITE_ALL else "a"
+            with h5py.File(f"../data/mc3d_features_{calculation_type}.h5", mode) as f:
+                method_group = f[feature_method] if feature_method in f else f.create_group(feature_method)
+                if existing_key := _equal_params_existing(method_group, attrs):
+                    if OVERWRITE_NEW:
+                        del method_group[existing_key]
+                    else:
+                        print(f"Skipping existing instance of {feature_method}")
+                        continue
+                print(f"Featurizing with {feature_method}")
+                features = featurize_dirs(dirs, featurization)
+                instance_key = str(max([int(key) for key in method_group.keys()], default=-1) + 1)
+                instance_group = method_group.create_group(instance_key)
+                for key, val in attrs.items():
+                    instance_group.attrs[key] = val
+
+                # Chunking is important for efficient access
+                # We aim for chunks that are roughly 512 KB in size, completely capturing at least one feature
+                # vector.
+                chunk_rows = max(512_000 // features["features"][0].nbytes, 1)
+                chunk_cols = features["features"].shape[1]
+                instance_group.create_dataset(
+                    "features",
+                    data=features["features"],
+                    compression="gzip",
+                    chunks=(chunk_rows, chunk_cols),
+                    shuffle=True,
+                    dtype=FEATURE_DTYPE,
+                )
+                instance_group.create_dataset("material_id", data=features["material_id"], compression="gzip")
 
 
 # %%

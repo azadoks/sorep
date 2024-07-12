@@ -83,7 +83,7 @@ def collate_features(
     base_dir: os.PathLike,
     calculation_type: str,
     path: os.PathLike,
-    dtype=None,
+    dtype=np.float64,
 ) -> None:
     with h5py.File(path, "w") as collated_file:
         for dir_ in pl.Path(base_dir).glob(f"*/{calculation_type}/"):
@@ -91,16 +91,13 @@ def collate_features(
                 continue
             with h5py.File(dir_ / "features.h5", "r") as features_file:
                 for material_id, material_group in features_file.items():
-                    for calculation_type, calculation_group in material_group.items():
+                    for _, calculation_group in material_group.items():
                         for feature_type, feature_group in calculation_group.items():
                             for feature_id, feature_id_group in feature_group.items():
-                                collated_file.create_group(
-                                    f"{material_id}/{calculation_type}/{feature_type}/{feature_id}"
-                                )
+                                group = collated_file.create_group(f"{material_id}/{feature_type}/{feature_id}")
                                 for key, dataset in feature_id_group.items():
-                                    collated_file[f"{material_id}/{calculation_type}/{feature_type}/{feature_id}"][
-                                        key
-                                    ] = dataset[()]
+                                    data = dataset[()].astype(dtype)
+                                    group.create_dataset(key, data=data, dtype=dtype)
 
 
 # %%
@@ -128,6 +125,7 @@ def main():
             base_dir=BASE_DIR,
             calculation_type=calculation_type,
             path=base_dir.parent / f"{database_name}_features_{calculation_type}.h5",
+            dtype=np.float32,
         )
 
 
