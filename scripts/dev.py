@@ -1,56 +1,48 @@
 # %%
-import json
 import pathlib as pl
 
-from matplotlib import colormaps
-import matplotlib.pyplot as plt
-import pandas as pd
+import h5py
 
-# e = hc/λ
-# λ = hc/e
-PLANCK_CONSTANT_EVS = 6.582119569e-16  # eV s
-PLANCK_CONSTANT_EV_HZ = 4.135667696e-15  # eV Hz^-1
-SPEED_OF_LIGHT_M_S = 299792458  # m / s
-
-
-def ev_to_nm(energy):
-    return (PLANCK_CONSTANT_EVS * SPEED_OF_LIGHT_M_S / energy) * 1e9
-
-
-def nm_to_ev(wavelength):
-    return PLANCK_CONSTANT_EVS * SPEED_OF_LIGHT_M_S / (wavelength * 1e-9)
-
+import sorep
 
 # %%
-criteria = []
-eff_masses = []
-for dir_ in pl.Path("../data/mc3d/").glob("*/bands/"):
-    with open(dir_ / "tcm_criteria.json", "r", encoding="utf-8") as fp:
-        tmp = json.load(fp)
-    eff_masses.append(tmp.pop("effective_masses"))
-    criteria.append({"sorep_id": dir_.parent.name, **tmp})
+KWARGS = {"compression": "gzip", "shuffle": True}
+with h5py.File("../data/mc3d_data.h5", "w") as f:
+    for material_dir in pl.Path("../data/mc3d").iterdir():
+        material_id = material_dir.name
+        for calculation_dir in material_dir.iterdir():
+            calculation_type = calculation_dir.name
+            material = sorep.MaterialData.from_dir(calculation_dir)
 
-criteria = pd.DataFrame(criteria).dropna(axis="index")
-eff_masses = pd.DataFrame(eff_masses)
+            g = f.create_group(f"{material_id}/{calculation_type}")
+            for key, value in material.metadata.items():
+                g.attrs[key] = value or ""
 
-tcms = criteria[criteria.meets_band_gap & criteria.meets_electron_effective_mass & criteria.meets_hole_effective_mass]
-# %%
-tcms
-# %%
-fig, axes = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=True)
+            bands_group = g.create_group("bands")
+            bands_group.create_dataset("energies", data=material.bands.bands, **KWARGS)
+            bands_group["energies"].attrs["units"] = "eV"
+            bands_group.create_dataset("kpoints", data=material.bands.fractional_kpoints, **KWARGS)
+            bands_group["kpoints"].attrs["units"] = "dimensionless"
+            bands_group.create_dataset("weights", data=material.bands.weights, **KWARGS)
+            bands_group["weights"].attrs["units"] = "dimensionless"
+            bands_group.create_dataset("cell", data=material.bands.cell, **KWARGS)
+            bands_group["cell"].attrs["units"] = "angstrom"
+            bands_group.create_dataset("occupations", data=material.bands.occupations, **KWARGS)
+            bands_group["occupations"].attrs["units"] = "dimensionless"
+            bands_group.create_dataset("labels", data=[str(label) for label in material.bands.labels], **KWARGS)
+            bands_group.create_dataset("label_numbers", data=material.bands.label_numbers, **KWARGS)
+            bands_group.create_dataset("fermi_energy", data=material.bands.fermi_energy)
+            bands_group["fermi_energy"].attrs["units"] = "eV"
+            bands_group.create_dataset("n_electrons", data=material.bands.fermi_energy)
+            atoms_group = g.create_group("atoms")
 
-axes[0].scatter(tcms.band_gap, -tcms.hole_effective_mass, marker=".")
-axes[0].axhline(1.0, color="black", linestyle="--")
-axes[0].set_xlabel("Band gap (eV)")
-axes[0].set_ylabel("Hole effective mass")
-
-axes[1].scatter(tcms.band_gap, tcms.electron_effective_mass, marker=".")
-axes[1].axhline(0.5, color="black", linestyle="--")
-axes[1].set_xlabel("Band gap (eV)")
-axes[1].set_ylabel("Electron effective mass")
-
-
-for ax in axes:
-    ax.axvline(0.5, color="black", linestyle="--")
+            for key, value in material.atoms.arrays.items():
+                atoms_group.create_dataset(key, data=value, **KWARGS)
+            atoms_group["positions"].attrs["units"] = "angstrom"
+            if "masses" in atoms_group:
+                atoms_group["masses"].attrs["units"] = "amu"
+            atoms_group.create_dataset("cell", data=material.atoms.cell, **KWARGS)
+            atoms_group["cell"].attrs["units"] = "angstrom"
+            atoms_group.create_dataset("pbc", data=material.atoms.pbc, **KWARGS)
 
 # %%

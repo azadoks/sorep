@@ -40,6 +40,7 @@ seaborn = "^0.13.2"
 h5py = "^3.11.0"
 dscribe = "^2.1.1"
 skmatter = "^0.2.0"
+tables = "^3.9.2"
 
 [tool.isort]
 profile = "black"

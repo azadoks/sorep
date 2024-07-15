@@ -3,7 +3,9 @@ from functools import partial
 from multiprocessing import Pool
 import os
 import pathlib as pl
+import platform
 
+import h5py
 import imblearn.ensemble as imbe
 import numpy as np
 import pandas as pd
@@ -13,6 +15,11 @@ import sklearn.model_selection as skms
 import sklearn.pipeline as skpl
 import sklearn.preprocessing as skpp
 from tqdm import tqdm
+
+if platform.system() == "Linux":
+    import sklearnex
+
+    sklearnex.patch_sklearn()
 
 
 # %%
@@ -84,7 +91,6 @@ def evaluate_model(model, X_test, y_test, X_train, y_train):
     except AttributeError:
         feature_importances = None
     metrics = {
-        "y_pred": y_test_pred,
         "balanced_accuracy": skm.balanced_accuracy_score(y_test, y_test_pred, adjusted=True),
         "f1": skm.f1_score(y_test, y_test_pred),
         "precision": skm.precision_score(y_test, y_test_pred),
@@ -97,23 +103,28 @@ def evaluate_model(model, X_test, y_test, X_train, y_train):
     return metrics
 
 
-def load_data(data_dir: os.PathLike, database: str, calculation_type: str, feature_id: str):
+def load_data(data_dir: os.PathLike, database: str, calculation_type: str, feature_path: str):
     with open(data_dir / f"{database}_targets.npz", "rb") as fp:
         npz = np.load(fp)
         target_df = pd.DataFrame(data=dict(npz))
 
-    with open(data_dir / f"{database}_features_{calculation_type}_{feature_id}.npz", "rb") as fp:
-        npz = np.load(fp)
-        feature_df = pd.DataFrame(data={k: v.tolist() for (k, v) in npz.items()})
+    with h5py.File(data_dir / f"{database}_features_{calculation_type}.h5", "r") as f:
+        feature_df = pd.DataFrame(
+            data={
+                "material_id": f[feature_path]["material_id"][()].astype(str),
+                "features": f[feature_path]["features"][()].tolist(),
+            }
+        )
 
     df = pd.merge(target_df, feature_df, on="material_id")
     X = np.array(df["features"].tolist())
     y = df["meets_tcm_criteria"].to_numpy()
+    id_ = df["material_id"].to_numpy()
 
     # Create constant hold-out validation set of 10% of the data
-    X, X_val, y, y_val = skms.train_test_split(X, y, test_size=0.1, random_state=9997)
+    X, X_val, y, y_val, id_, id_val = skms.train_test_split(X, y, id_, test_size=0.1, random_state=9997)
 
-    return (X, X_val, y, y_val)
+    return (X, X_val, y, y_val, id_, id_val)
 
 
 def get_random_states(labels, train_sizes, min_populations=None, seed=9997):
@@ -137,18 +148,17 @@ def get_random_states(labels, train_sizes, min_populations=None, seed=9997):
     return random_states
 
 
-def train_evaluate(feature_id, train_sizes, random_states):
+def train_evaluate(feature_path, train_sizes, random_states):
     results = []
-    X, _, y, _ = load_data(pl.Path("../data"), DATASET, CALCULATION_TYPE, feature_id)
+    X, _, y, _, id_, _ = load_data(pl.Path(DATA_DIR), DATABASE, CALCULATION_TYPE, feature_path)
 
     for train_size, random_state in zip(train_sizes, random_states):
-        X_train, X_test, y_train, y_test = skms.train_test_split(X, y, train_size=train_size, random_state=random_state)
+        X_train, X_test, y_train, y_test, id_train, id_test = skms.train_test_split(
+            X, y, id_, train_size=train_size, random_state=random_state
+        )
 
         model = train_rfc(X_train, y_train, random_state)
         metrics = evaluate_model(model, X_test, y_test, X_train, y_train)
-
-        dummy = train_dummy(X_train, y_train)
-        metrics_dummy = evaluate_model(dummy, X_test, y_test, X_train, y_train)
 
         results.append(
             {
@@ -156,25 +166,28 @@ def train_evaluate(feature_id, train_sizes, random_states):
                 "train_number": X_train.shape[0],
                 "random_state": random_state,
                 **metrics,
-                **{f"dummy_{key}": value for (key, value) in metrics_dummy.items()},
             }
         )
+        print(f"{feature_path:<40s} {train_size:8.4f} {metrics['balanced_accuracy']: 8.4f} {metrics['yield']: 8.4f}")
 
-    results_df = pd.DataFrame(results)
-    results_df.to_json(pl.Path(DATA_DIR) / f"{DATASET}_metrics_{CALCULATION_TYPE}_{feature_id}.json")
+    results = pd.DataFrame(results).to_dict(orient="list")
+    return results
 
 
 # %% Train models
 DATA_DIR = "../data/"
-DATASET = "mc3d"
+DATABASE = "mc3d"
 CALCULATION_TYPE = "single_shot"
-FEATURE_IDS = [
-    # "dos_cbm_centered_gauss_0.05_-6.00_2.00_512",
-    # "dos_fermi_centered_gauss_0.05_-5.00_5.00_512",
-    # "dos_vbm_centered_gauss_0.05_-2.00_6.00_512",
-    # "dos_fermi_scissor_gauss_0.05_-2.00_0.15_-0.15_2.00_512",
-    # "dos_fermi_scissor_gauss_0.05_-2.00_2.00_-2.00_2.00_512",
-    "dos_vfc_concat_gauss_0.05_-1.00_1.00_-1.00_1.00_-1.00_1.00_512"
+PARALLEL = True
+FEATURE_PATHS = [
+    "vbm_centered/0",  # -2:513:+6
+    "fermi_centered/0",  # -5:513:+5
+    "cbm_centered/0",  # -6:513:+2
+    "vbm_cbm_concatenated/0",  # -2:257:+3σ, -3σ:257:+2
+    "vbm_cbm_concatenated/1",  # -2:257:+2, -2:257:+2
+    "vbm_fermi_cbm_concatenated/0",  # -1:171:+1, -1:171:+1, -1:171:+1
+    "soap/0",  # No species (~500 features)
+    # "soap/1",  # With species (~600'000 features) #! Code needs refactoring to handle this
 ]
 TRAIN_SIZES = [
     0.001,
@@ -213,16 +226,32 @@ def main():
     # Get constant random states for each train size and repeat so that the splits are the same for all feature types,
     # assuming the data are in the same order across feature types
     train_sizes = np.repeat(TRAIN_SIZES, N_REPEATS)
-    _, _, y, _ = load_data(pl.Path("../data"), DATASET, CALCULATION_TYPE, FEATURE_IDS[0])
+    _, _, y, _, _, _ = load_data(pl.Path(DATA_DIR), DATABASE, CALCULATION_TYPE, FEATURE_PATHS[0])
     random_states = get_random_states(y, train_sizes, min_populations={0: 1, 1: 1})
 
     _train_evaluate = partial(train_evaluate, train_sizes=train_sizes, random_states=random_states)
 
-    feature_id_pbar = tqdm(FEATURE_IDS, ncols=120)
-    with Pool(processes=12, maxtasksperchild=1) as p:
-        p.map(_train_evaluate, feature_id_pbar)
+    feature_path_pbar = tqdm(FEATURE_PATHS, ncols=120)
+    if PARALLEL:
+        with Pool(processes=12, maxtasksperchild=2) as pool:
+            results = pool.map(_train_evaluate, feature_path_pbar)
+    else:
+        results = []
+        for feature_path in feature_path_pbar:
+            results.append(_train_evaluate(feature_path))
+
+    print("Saving results")
+    with h5py.File(pl.Path(DATA_DIR) / f"{DATABASE}_metrics_{CALCULATION_TYPE}.h5", "a") as f:
+        for feature_path, feature_results in zip(FEATURE_PATHS, results):
+            if feature_path in f:
+                del f[feature_path]
+            g = f.create_group(feature_path)
+            for key, val in feature_results.items():
+                g.create_dataset(key, data=val)
 
 
 # %%
 if __name__ == "__main__":
     main()
+
+# %%

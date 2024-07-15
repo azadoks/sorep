@@ -130,6 +130,42 @@ def _get_metadata(res: dict) -> dict:
     }
 
 
+def _get_bands_arrays(res: dict, recompute_fermi_occupations: bool = True) -> dict:
+    metadata = _get_metadata(res)
+    bands_arrays = {
+        "bands": res["bands"]["*"].get_array("bands"),
+        "kpoints": res["bands"]["*"].get_array("kpoints"),
+        "weights": res["bands"]["*"].get_array("weights"),
+        "occupations": res["bands"]["*"].get_array("occupations"),
+        "labels": res["bands"].get("attributes.labels", []),
+        "label_numbers": np.array(res["bands"].get("attributes.label_numbers", []), dtype=int),
+        "fermi_energy": metadata["fermi_energy"],
+        "n_electrons": metadata["n_electrons"],
+    }
+    # Add a spin dimension if missing
+    for key in ("bands", "occupations"):
+        bands_arrays[key] = bands_arrays[key] if bands_arrays[key].ndim == 3 else np.expand_dims(bands_arrays[key], 0)
+
+    if recompute_fermi_occupations:
+        bandstructure = sorep.BandStructure(**bands_arrays, n_electrons=metadata["number_of_electrons"])
+        fermi_energy = bandstructure.find_fermi_energy(metadata["smearing"], metadata["degauss"], n_electrons_tol=1e-4)
+        # Move the Fermi energy to mid-gap if insulating
+        bandstructure.fermi_energy = fermi_energy
+        if bandstructure.is_insulating():
+            fermi_energy = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
+        occupations = bandstructure.compute_occupations(metadata["smearing"], metadata["degauss"], fermi_energy)
+        bands_arrays["fermi_energy"] = fermi_energy
+        bands_arrays["occupations"] = occupations
+
+    return bands_arrays
+
+
+def _get_atoms_arrays(res: dict) -> dict:
+    structure = res["structure"]["*"]
+    atoms = structure.get_ase()
+    return {**atoms.arrays, "cell": atoms.cell.array, "pbc": atoms.pbc}
+
+
 def _dump_result(res: dict, calc_type: str, recompute_fermi_occupations: bool = True, dry_run: bool = False) -> None:
     """Write the structure, bands, and metadata for a calculation from a query result dictionary.
 
@@ -176,6 +212,19 @@ def _dump_result(res: dict, calc_type: str, recompute_fermi_occupations: bool = 
         # Write metadata
         with open(structure_calc_type_dir / "metadata.json", "w", encoding="utf-8") as fp:
             json.dump(metadata, fp)
+
+
+def _hdf_result(hdf_group, res: dict, recompute_fermi_occupations: bool = True) -> None:
+    for key, value in _get_metadata(res).items():
+        hdf_group.attrs[key] = value
+
+    bands_group = hdf_group.create_group("bands")
+    for key, value in _get_bands_arrays(res, recompute_fermi_occupations=recompute_fermi_occupations).items():
+        bands_group.create_dataset(key, data=value, compression="gzip", shuffle=True)
+
+    atoms_group = hdf_group.create_group("atoms")
+    for key, value in _get_atoms_arrays(res).items():
+        atoms_group.create_dataset(key, data=value, compression="gzip", shuffle=True)
 
 
 def _single_shot_query() -> list[dict]:
