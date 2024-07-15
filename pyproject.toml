@@ -1,46 +1,87 @@
-[tool.poetry]
+[build-system]
+requires = ["hatchling", "numpy>=1.12.0", "cython>=3.0.0"]
+build-backend = "hatchling.build"
+
+[project]
 name = "sorep"
-version = "0.1.0"
-description = "Spectral Operator Representations"
-authors = ["Austin Zadoks <austin.zadoks@protonmail.com>"]
-license = "GPL"
+dynamic = ["version"]
+description = 'Spectral Operator Representations'
 readme = "README.md"
-exclude = [
-    '.github/',
-    '.vscode/',
-    'docs/',
-    'examples/',
-    'test/',
-    'scripts/'
+requires-python = ">=3.8"
+license = { file = "LICENSE.txt" }
+keywords = [
+    "machine learning",
+    "materials science",
+    "spectral operators",
+    "representation",
+    "fingerprint",
+    "density of states",
+    "bandstructure",
+]
+authors = [{ name = "Austin Zadoks", email = "austin.zadoks@pm.me" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    "numpy>=1.21.0",
+    "scipy~=1.14.0",
+    "ase~=3.23.0",
+    "findiff~=0.10.0",
 ]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-numpy = "<2.0"
-scipy = "^1.14.0"
-ase = "^3.23.0"
-scikit-learn = "^1.5.1"
-imbalanced-learn = "^0.12.3"
-findiff = "^0.10.0"
+[project.optional-dependencies]
+dev = [
+    "matplotlib~=3.9.0",
+    "tqdm~=4.66.4",
+    "pytest~=8.2.2",
+    "ipython~=8.15.0",
+    "sphinx~=7.3.7",
+    "myst-parser~=3.0.1",
+    "pre-commit~=3.7.1",
+    "pylint~=3.2.5",
+    "black~=24.4.2",
+    "importlib-resources~=6.4.0",
+    "pandas~=2.2.2",
+    "jax~=0.4.30",
+    "seaborn~=0.13.2",
+    "h5py~=3.11.0",
+    "scikit-learn~=1.5.1",
+    "imbalanced-learn~=0.12.3",
+    "skmatter~=0.2.0",
+    "dscribe~=2.1.1",
+    "cython>=3.0.0",
+]
 
-[tool.poetry.group.dev.dependencies]
-matplotlib = "^3.9.0"
-tqdm = "^4.66.4"
-pytest = "^8.2.2"
-ipython = "^8.15.0"
-sphinx = "^7.3.7"
-myst-parser = "^3.0.1"
-pre-commit = "^3.7.1"
-pylint = "^3.2.5"
-black = "^24.4.2"
-importlib-resources = "^6.4.0"
-pandas = "^2.2.2"
-jax = "^0.4.30"
-seaborn = "^0.13.2"
-h5py = "^3.11.0"
-dscribe = "^2.1.1"
-skmatter = "^0.2.0"
-tables = "^3.9.2"
+[project.urls]
+Documentation = "https://github.com/azadoks/sorep#readme"
+Issues = "https://github.com/azadoks/sorep/issues"
+Source = "https://github.com/azadoks/sorep"
+
+[tool.hatch.version]
+path = "src/sorep/__about__.py"
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src/sorep"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sorep"]
+artifacts = ["*.so", "*.dll"]
+
+[tool.hatch.build.targets.wheel.hooks.cython]
+dependencies = ["hatch-cython"]
+
+[tool.hatch.build.targets.wheel.hooks.cython.options]
+include_numpy = true
+compile_py = false
+compile_args = ["-O3"]
 
 [tool.isort]
 profile = "black"
@@ -68,9 +109,5 @@ good-names = [
     'dz',
     'dk',
     'ef',
-    'ne'
+    'ne',
 ]
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
