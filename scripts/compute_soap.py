@@ -59,7 +59,7 @@ def main():
                 # Read in the images for each featurization; they may be modified below to remove species information
                 images = read(f"../data/mc3d_structures_{calculation_type}.xyz", ":")
                 # Construct the species list
-                if params.get("species", False):
+                if not params["species"]:
                     for image in images:
                         image.set_atomic_numbers(np.ones(image.get_global_number_of_atoms(), dtype=int))
                     params["species"] = [1]
@@ -112,24 +112,6 @@ OVERWRITE_NEW = False
 SOAP_PARAMS = [
     {
         "r_cut": 6.0,
-        "n_max": 6,
-        "l_max": 4,
-        "sigma": 0.3,
-        "rbf": "gto",
-        "weighting": {
-            "function": "poly",
-            "r0": 5.0,
-            "c": 1.0,
-            "m": 1.0,
-        },
-        "average": "inner",
-        "periodic": True,
-        "sparse": True,
-        "dtype": "float32",
-        "species": True,
-    },
-    {
-        "r_cut": 6.0,
         "n_max": 10,
         "l_max": 9,
         "sigma": 0.3,
@@ -146,6 +128,24 @@ SOAP_PARAMS = [
         "dtype": "float32",
         "species": False,
     },
+    # {
+    #     "r_cut": 6.0,
+    #     "n_max": 6,
+    #     "l_max": 4,
+    #     "sigma": 0.3,
+    #     "rbf": "gto",
+    #     "weighting": {
+    #         "function": "poly",
+    #         "r0": 5.0,
+    #         "c": 1.0,
+    #         "m": 1.0,
+    #     },
+    #     "average": "inner",
+    #     "periodic": True,
+    #     "sparse": True,
+    #     "dtype": "float32",
+    #     "species": True,
+    # },
 ]
 # %%
 if __name__ == "__main__":

@@ -180,14 +180,15 @@ DATABASE = "mc3d"
 CALCULATION_TYPE = "single_shot"
 PARALLEL = True
 FEATURE_PATHS = [
-    "vbm_centered/0",  # -2:513:+6
-    "fermi_centered/0",  # -5:513:+5
-    "cbm_centered/0",  # -6:513:+2
-    "vbm_cbm_concatenated/0",  # -2:257:+3σ, -3σ:257:+2
-    "vbm_cbm_concatenated/1",  # -2:257:+2, -2:257:+2
-    "vbm_fermi_cbm_concatenated/0",  # -1:171:+1, -1:171:+1, -1:171:+1
-    "soap/0",  # No species (~500 features)
-    # "soap/1",  # With species (~600'000 features) #! Code needs refactoring to handle this
+    # "vbm_centered/0",  # -2:513:+6
+    # "fermi_centered/0",  # -5:513:+5
+    # "cbm_centered/0",  # -6:513:+2
+    # "vbm_cbm_concatenated/0",  # -2:257:+3σ, -3σ:257:+2
+    # "vbm_cbm_concatenated/1",  # -2:257:+2, -2:257:+2
+    # "vbm_fermi_cbm_concatenated/0",  # -1:171:+1, -1:171:+1, -1:171:+1
+    # "soap/0",  # No species (~105 features)
+    # "soap/1",  # With species (~3.6M features) #! Code needs refactoring to handle this
+    "soap/2"
 ]
 TRAIN_SIZES = [
     0.001,

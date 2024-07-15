@@ -17,6 +17,7 @@ load_profile("3dd_sorep")
 PwCalculation = plugins.CalculationFactory("quantumespresso.pw")
 PwBaseWorkChain = plugins.WorkflowFactory("quantumespresso.pw.base")
 PwBandsWorkChain = plugins.WorkflowFactory("quantumespresso.pw.bands")
+# TODO: not up-to-date on the HDF5 format (see to_hdf5.py)
 # %%
 STRUCTURE_KWARGS = {
     "cls": orm.StructureData,
@@ -184,11 +185,11 @@ def _dump_result(res: dict, calc_type: str, recompute_fermi_occupations: bool = 
         structure_calc_type_dir.mkdir(exist_ok=False, parents=True)
 
     bands_arrays = {
-        "bands": res["bands"]["*"].get_array("bands"),
+        "eigenvalues": res["bands"]["*"].get_array("bands"),
         "kpoints": res["bands"]["*"].get_array("kpoints"),
         "weights": res["bands"]["*"].get_array("weights"),
         "occupations": res["bands"]["*"].get_array("occupations"),
-        "labels": np.array(res["bands"].get("attributes.labels", []), dtype="<U32"),
+        "labels": res["bands"].get("attributes.labels", []),
         "label_numbers": np.array(res["bands"].get("attributes.label_numbers", []), dtype=int),
     }
 

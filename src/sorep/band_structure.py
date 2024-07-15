@@ -5,6 +5,7 @@ import os
 import typing as ty
 
 from ase.io import read
+import h5py
 import numpy as np
 import numpy.typing as npt
 
@@ -17,7 +18,7 @@ __all__ = ()
 
 
 class BandStructure:
-    # pylint: disable=too-many-instance-attributes,too-many-branches,too-many-statements
+    # pylint: disable=too-many-instance-attributes,too-many-branches,too-many-statements,too-many-public-methods
     """Band structure data and useful operations."""
 
     def __init__(  # pylint: disable=too-many-arguments
@@ -143,7 +144,7 @@ class BandStructure:
     @classmethod
     def from_files(
         cls, npz_path: os.PathLike, xyz_path: os.PathLike, json_path: ty.Optional[os.PathLike] = None
-    ) -> None:
+    ) -> "BandStructure":
         """Load a band structure from an NPZ file containing arrays, an extended XYZ file containing a
         periodic structure, and a JSON file containing metadata.
 
@@ -182,6 +183,53 @@ class BandStructure:
             cell=atoms.cell.array,
             fermi_energy=metadata.get("fermi_energy"),
             n_electrons=metadata.get("number_of_electrons"),
+        )
+
+    @classmethod
+    def from_hdf(
+        cls,
+        hdf: ty.Union[h5py.Group, h5py.File],
+    ) -> "BandStructure":
+        """Load a band structure from an HDF5 `File` or `Group` which contains the following `Dataset`s:
+
+        - eigenvalues: (n_spins, n_kpoints, n_bands) Eigenvalues/bands.
+        - kpoints: (n_kpoints, 3) K-points.
+        - weights: (n_kpoints,) K-point weights.
+        - cell: (3, 3) Unit cell with rows as the cell vectors.
+        - occupations (optional): (n_spins, n_kpoints, n_bands) Occupations.
+        - labels (optional): (n_labels,) K-point labels.
+        - label_numbers (optional): (n_labels,) K-point label indices.
+        - fermi_energy (optional): Fermi energy.
+        - n_electrons (optional): Number of electrons.
+
+        Units are assumed to be saved as `Dataset` `attrs` with the key `units` as follows:
+        - eigenvalues: eV
+        - kpoints: dimensionless or angstrom^-1
+        - weights: n/a
+        - cell: angstrom
+        - occupations: n/a
+        - labels: n/a
+        - label_numbers: n/a
+        - fermi_energy: eV
+        - n_electrons n/a
+
+        The `kpoints` are assumed to be in `angstrom^-1` if their units are not set to `dimensionless`.
+
+
+        Args:
+            hdf (ty.Union[h5py.Group, h5py.File]): HDF5 File or Group
+        """
+        return cls(
+            bands=hdf["eigenvalues"][()],
+            kpoints=hdf["kpoints"][()],
+            weights=hdf["weights"][()],
+            cell=hdf["cell"][()],
+            occupations=hdf["occupations"][()] if "occupations" in hdf else None,
+            labels=hdf["labels"][()].astype(str) if "labels" in hdf else None,
+            label_numbers=hdf["label_numbers"][()] if "label_numbers" in hdf else None,
+            fermi_energy=hdf["fermi_energy"][()] if "fermi_energy" in hdf else None,
+            n_electrons=hdf["n_electrons"][()] if "n_electrons" in hdf else None,
+            kpoints_are_cartesian=hdf["kpoints"].attrs["units"] == "dimensionless",
         )
 
     @property

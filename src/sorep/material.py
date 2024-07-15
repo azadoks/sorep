@@ -4,9 +4,11 @@ from dataclasses import dataclass
 import json
 import os
 import pathlib as pl
+import typing as ty
 
 from ase import Atoms
 from ase.io import read
+import h5py
 
 from .band_structure import BandStructure
 
@@ -66,3 +68,38 @@ class MaterialData:
         with open(metadata_path, "r", encoding="utf-8") as fp:
             metadata = json.load(fp)
         return cls(atoms, bands, metadata)
+
+    @classmethod
+    def from_hdf(cls, hdf: ty.Union[h5py.File, h5py.Group]) -> "MaterialData":
+        """Load the material data from an HDF5 file or group containing the following structure:
+
+        - `attrs`
+            - Metadata attributes.
+        - atoms
+            - positions: Atomic positions.
+            - numbers: Atomic numbers.
+            - masses: Atomic masses (optional).
+            - cell: Unit cell.
+            - pbc: Periodic boundary conditions.
+        - bands
+            - eigenvalues: Eigenvalues.
+            - kpoints: K-points.
+            - weights: Weights.
+            - cell: Cell.
+            - occupations: Occupations.
+            - labels: Labels.
+            - label_numbers: Label numbers.
+            - fermi_energy: Fermi energy.
+            - n_electrons: Number of electrons.
+
+        Args:
+            hdf (ty.Union[h5py.File, h5py.Group]): HDF5 file or group containing the material data.
+        """
+        atoms = Atoms(
+            positions=hdf["atoms/positions"][()],
+            numbers=hdf["atoms/numbers"][()],
+            masses=hdf["atoms/masses"][()] if "masses" in hdf["atoms"] else None,
+            cell=hdf["atoms/cell"][()],
+            pbc=hdf["atoms/pbc"][()],
+        )
+        return cls(atoms=atoms, bands=BandStructure.from_hdf(hdf["bands"]), metadata=dict(hdf.attrs))
