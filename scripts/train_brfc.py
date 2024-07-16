@@ -1,4 +1,5 @@
 # %%
+from datetime import datetime
 from functools import partial
 from multiprocessing import Pool
 import os
@@ -7,9 +8,11 @@ import platform
 
 import h5py
 import imblearn.ensemble as imbe
+from joblib import dump
 import numpy as np
 import pandas as pd
 import sklearn.dummy as skd
+import sklearn.inspection as ski
 import sklearn.metrics as skm
 import sklearn.model_selection as skms
 import sklearn.pipeline as skpl
@@ -48,7 +51,7 @@ def grid_cross_validate(X_train, y_train):
     return pipe.fit(X_train, y_train)
 
 
-def train_rfc(X_train, y_train, random_state):
+def train_brfc(X_train, y_train, random_state):
     pipe = skpl.Pipeline(
         [
             ("scaler", skpp.StandardScaler()),
@@ -87,9 +90,12 @@ def yield_score(y_test, y_pred, y_train):
 def evaluate_model(model, X_test, y_test, X_train, y_train):
     y_test_pred = model.predict(X_test)
     try:
-        feature_importances = model.named_steps["brfc"].feature_importances_
+        impurity_feature_importances = model.named_steps["brfc"].feature_importances_
     except AttributeError:
-        feature_importances = None
+        impurity_feature_importances = None
+    # permutation_feature_importances = ski.permutation_importance(
+    #     model, X_test, y_test, scoring="balanced_accuracy", n_repeats=10, random_state=0
+    # )
     metrics = {
         "balanced_accuracy": skm.balanced_accuracy_score(y_test, y_test_pred, adjusted=True),
         "f1": skm.f1_score(y_test, y_test_pred),
@@ -98,7 +104,8 @@ def evaluate_model(model, X_test, y_test, X_train, y_train):
         "roc_auc": skm.roc_auc_score(y_test, y_test_pred),
         "confusion_matrix": skm.confusion_matrix(y_test, y_test_pred),
         "yield": yield_score(y_test, y_test_pred, y_train),
-        "feature_importances": feature_importances,
+        "impurity_feature_importances": impurity_feature_importances,
+        # "permutation_feature_importances": permutation_feature_importances["importances_mean"],
     }
     return metrics
 
@@ -157,7 +164,7 @@ def train_evaluate(feature_path, train_sizes, random_states):
             X, y, id_, train_size=train_size, random_state=random_state
         )
 
-        model = train_rfc(X_train, y_train, random_state)
+        model = train_brfc(X_train, y_train, random_state)
         metrics = evaluate_model(model, X_test, y_test, X_train, y_train)
 
         results.append(
@@ -168,10 +175,15 @@ def train_evaluate(feature_path, train_sizes, random_states):
                 **metrics,
             }
         )
+        creation_time = datetime.isoformat(datetime.now())
+        path = pl.Path(f"../models/{feature_path}/{train_size:.4f}_{random_state}_{creation_time}).pkl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as fp:
+            dump(model, fp, protocol=5)
         print(f"{feature_path:<40s} {train_size:8.4f} {metrics['balanced_accuracy']: 8.4f} {metrics['yield']: 8.4f}")
 
     results = pd.DataFrame(results).to_dict(orient="list")
-    return results
+    return results, creation_time
 
 
 # %% Train models
@@ -180,15 +192,15 @@ DATABASE = "mc3d"
 CALCULATION_TYPE = "single_shot"
 PARALLEL = True
 FEATURE_PATHS = [
-    # "vbm_centered/0",  # -2:513:+6
-    # "fermi_centered/0",  # -5:513:+5
-    # "cbm_centered/0",  # -6:513:+2
-    # "vbm_cbm_concatenated/0",  # -2:257:+3σ, -3σ:257:+2
-    # "vbm_cbm_concatenated/1",  # -2:257:+2, -2:257:+2
-    # "vbm_fermi_cbm_concatenated/0",  # -1:171:+1, -1:171:+1, -1:171:+1
-    # "soap/0",  # No species (~105 features)
+    "vbm_centered/0",  # -2:513:+6
+    "fermi_centered/0",  # -5:513:+5
+    "cbm_centered/0",  # -6:513:+2
+    "vbm_cbm_concatenated/0",  # -2:257:+3σ, -3σ:257:+2
+    "vbm_cbm_concatenated/1",  # -2:257:+2, -2:257:+2
+    "vbm_fermi_cbm_concatenated/0",  # -1:171:+1, -1:171:+1, -1:171:+1
+    "soap/0",  # No species (~105 features, n=6, l=4, r=6)
     # "soap/1",  # With species (~3.6M features) #! Code needs refactoring to handle this
-    "soap/2"
+    "soap/2",  # No species (~550 features, n=10, l=9, r=6)
 ]
 TRAIN_SIZES = [
     0.001,
@@ -244,9 +256,11 @@ def main():
     print("Saving results")
     with h5py.File(pl.Path(DATA_DIR) / f"{DATABASE}_metrics_{CALCULATION_TYPE}.h5", "a") as f:
         for feature_path, feature_results in zip(FEATURE_PATHS, results):
+            feature_results, creation_time = feature_results
             if feature_path in f:
                 del f[feature_path]
             g = f.create_group(feature_path)
+            g.attrs["creation_time"] = creation_time
             for key, val in feature_results.items():
                 g.create_dataset(key, data=val)
 
