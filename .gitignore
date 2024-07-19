@@ -167,9 +167,18 @@ data/
 data
 plots/
 plot
+models/
+model
 
 # Poetry
 poetry.lock
 
 # VS Code
 .vscode/
+
+# Zed
+.zed/
+
+# Julia
+Manifest.toml
+Project.toml

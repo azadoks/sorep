@@ -70,15 +70,20 @@ def smeared_dos(
     else:
         raise ValueError(f"Unknown smearing type '{smearing_type}'")
 
-    dos = np.zeros((bands.shape[0], energies.shape[0]), dtype=np.float64)
+    cdef Py_ssize_t n_spins = bands.shape[0]
+    cdef Py_ssize_t n_kpoints = bands.shape[1]
+    cdef Py_ssize_t n_bands = bands.shape[2]
+    cdef Py_ssize_t n_energies = energies.shape[0]
+    dos = np.zeros((n_spins, n_energies), dtype=np.float64)
     cdef cnp.float64_t[:, ::1] dos_view = dos  # C view of the dos numpy array
     cdef double inv_width = 1 / smearing_width
     cdef double z  # Z-value temporary variable (E - Enk) / σ
+    cdef Py_ssize_t i_spin, i_energy, i_kpoint, i_band
 
-    for i_spin in range(bands.shape[0]):
-        for i_energy in range(energies.shape[0]):
-            for i_kpoint in range(bands.shape[1]):
-                for i_band in range(bands.shape[2]):
+    for i_spin in range(n_spins):
+        for i_energy in range(n_energies):
+            for i_kpoint in range(n_kpoints):
+                for i_band in range(n_bands):
                     # z = (x - μ) / σ
                     z = (bands[i_spin, i_kpoint, i_band] - energies[i_energy]) * inv_width
                     if abs(z) < zlim:

@@ -31,10 +31,13 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "numpy>=1.21.0",
-    "scipy~=1.14.0",
-    "ase~=3.23.0",
+    "ase~=3.22.0",
     "findiff~=0.10.0",
+    "importlib-resources~=6.4.0",
+    "numpy>=1.21.0",
+    "pyscf~=2.4",
+    "scipy~=1.14.0",
+    "spglib~=2.5",
 ]
 
 [project.optional-dependencies]
@@ -48,17 +51,17 @@ dev = [
     "pre-commit~=3.7.1",
     "pylint~=3.2.5",
     "black~=24.4.2",
-    "importlib-resources~=6.4.0",
     "pandas~=2.2.2",
-    "jax~=0.4.30",
     "seaborn~=0.13.2",
     "h5py~=3.11.0",
     "scikit-learn~=1.5.1",
     "imbalanced-learn~=0.12.3",
     "skmatter~=0.2.0",
     "dscribe~=2.1.1",
-    "cython>=3.0.0",
-    "fastdist>=1.1.6"
+    "cython~=3.0",
+    "fastdist~=1.1",
+    "pyscf~=2.4",
+    "spglib~=2.5",
 ]
 
 [project.urls]
