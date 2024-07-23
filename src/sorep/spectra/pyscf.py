@@ -56,10 +56,10 @@ def _build_cell(
         Cell: PySCF Cell object.
     """
     basis_kwargs = basis_kwargs or {}
-    a = atoms.cell.array * ANGSTROM_TO_BOHR
+    cell_array = atoms.cell.array * ANGSTROM_TO_BOHR
     atom = list(zip(atoms.symbols, atoms.positions * ANGSTROM_TO_BOHR))
     cell = Cell(
-        a=a,
+        a=cell_array,
         atom=atom,
         unit="Bohr",
         basis=_load_basis(basis, atoms, **basis_kwargs),
@@ -169,4 +169,4 @@ def compute_one_electron_spectrum(  # pylint: disable=too-many-arguments,too-man
         bands[i, 0 : eigvals.shape[0]] = eigvals
     # Add spin axis, convert Ha -> eV
     bands = np.expand_dims(bands, axis=0) * HARTREE_TO_EV
-    return BandStructure(bands=bands, kpoints=kpoints_frac, weights=weights, cell=atoms.cell.array)
+    return BandStructure(eigenvalues=bands, kpoints=kpoints_frac, weights=weights, cell=atoms.cell.array)

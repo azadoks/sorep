@@ -1,6 +1,19 @@
 """Spectral operator representations."""
 
-from . import band_segment, band_structure, constants, dos, features, fermi, material, pbc, prettify, smearing, spectra
+from . import (
+    band_segment,
+    band_structure,
+    constants,
+    dos,
+    features,
+    fermi,
+    material,
+    occupation,
+    pbc,
+    prettify,
+    smearing,
+    spectra,
+)
 from .band_structure import BandStructure
 from .material import MaterialData
 

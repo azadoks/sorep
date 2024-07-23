@@ -9,7 +9,7 @@ import h5py
 import numpy as np
 import numpy.typing as npt
 
-from . import fermi
+from . import fermi, occupation
 from .band_segment import BandPathSegment
 from .dos import smeared_dos
 from .pbc import recip_cart_to_frac, recip_frac_to_cart
@@ -23,7 +23,7 @@ class BandStructure:
 
     def __init__(  # pylint: disable=too-many-arguments
         self,
-        bands: npt.ArrayLike,
+        eigenvalues: npt.ArrayLike,
         kpoints: npt.ArrayLike,
         weights: npt.ArrayLike,
         cell: npt.ArrayLike,
@@ -37,7 +37,7 @@ class BandStructure:
         """Initialize a band structure.
 
         Args:
-            bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands.
+            eigenvalues (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands.
             kpoints (npt.ArrayLike): (n_kpoints, 3) k-points.
             weights (npt.ArrayLike): (n_kpoints,) k-point weights.
             cell (npt.ArrayLike): (3, 3) unit cell with rows as the cell vectors.
@@ -50,7 +50,7 @@ class BandStructure:
             n_electrons (ty.Optional[int], optional): number of electrons. Defaults to None.
         """
         # Convert to numpy arrays
-        bands = np.ascontiguousarray(bands)
+        eigenvalues = np.ascontiguousarray(eigenvalues)
         kpoints = np.ascontiguousarray(kpoints)
         weights = np.ascontiguousarray(weights)
         cell = np.ascontiguousarray(cell)
@@ -58,9 +58,9 @@ class BandStructure:
             occupations = np.ascontiguousarray(occupations)
 
         # Check all the shapes
-        if bands.ndim == 2:  # Add a spin dimension if not present
-            bands = np.expand_dims(bands, 0)
-        assert bands.ndim == 3
+        if eigenvalues.ndim == 2:  # Add a spin dimension if not present
+            eigenvalues = np.expand_dims(eigenvalues, 0)
+        assert eigenvalues.ndim == 3
 
         assert kpoints.ndim == 2
         assert kpoints.shape[1] == 3
@@ -70,21 +70,12 @@ class BandStructure:
         assert cell.ndim == 2
         assert cell.shape[0] == cell.shape[1] == 3
 
-        assert kpoints.shape[0] == weights.shape[0] == bands.shape[1]
+        assert kpoints.shape[0] == weights.shape[0] == eigenvalues.shape[1]
 
         if occupations is not None:
             if occupations.ndim == 2:  # Add a spin dimension if not present
                 occupations = np.expand_dims(occupations, 0)
-            assert occupations.shape == bands.shape
-
-        if labels is not None:
-            assert labels.ndim == 1
-
-        if label_numbers is not None:
-            assert label_numbers.ndim == 1
-
-        if labels is not None and label_numbers is not None:
-            assert labels.shape == label_numbers.shape
+            assert occupations.shape == eigenvalues.shape
 
         # Check that the number of electrons makes sense
         if n_electrons is not None:
@@ -120,7 +111,7 @@ class BandStructure:
             labels = ["", ""]
             label_numbers = [0, kpoints.shape[0] - 1]
 
-        self.bands = bands
+        self.eigenvalues = eigenvalues
         self.kpoints = kpoints
         self.weights = weights
         self.occupations = occupations
@@ -149,7 +140,7 @@ class BandStructure:
         periodic structure, and a JSON file containing metadata.
 
         The NPZ file should contain the following arrays:
-        - bands: (n_spins, n_kpoints, n_bands) Eigenvalues/bands.
+        - eigenvalues: (n_spins, n_kpoints, n_bands) Eigenvalues/bands.
         - kpoints: (n_kpoints, 3) K-points.
         - weights: (n_kpoints,) K-point weights.
         - occupations: (n_spins, n_kpoints, n_bands) Occupations (optional).
@@ -220,7 +211,7 @@ class BandStructure:
             hdf (ty.Union[h5py.Group, h5py.File]): HDF5 File or Group
         """
         return cls(
-            bands=hdf["eigenvalues"][()],
+            eigenvalues=hdf["eigenvalues"][()],
             kpoints=hdf["kpoints"][()],
             weights=hdf["weights"][()],
             cell=hdf["cell"][()],
@@ -239,7 +230,7 @@ class BandStructure:
         Returns:
             int: Number of spin channels
         """
-        return self.bands.shape[0]
+        return self.eigenvalues.shape[0]
 
     @property
     def n_kpoints(self):
@@ -248,7 +239,7 @@ class BandStructure:
         Returns:
             int: Number of k-points.
         """
-        return self.bands.shape[1]
+        return self.eigenvalues.shape[1]
 
     @property
     def n_bands(self) -> int:
@@ -257,7 +248,7 @@ class BandStructure:
         Returns:
             int: Number of bands.
         """
-        return self.bands.shape[2]
+        return self.eigenvalues.shape[2]
 
     @property
     def max_occupation(self) -> float:
@@ -322,7 +313,7 @@ class BandStructure:
             ik_from = self.label_numbers[i_from]
             ik_to = self.label_numbers[i_to] + 1
             segment = BandPathSegment(
-                bands=self.bands[:, ik_from:ik_to].copy(),
+                eigenvalues=self.eigenvalues[:, ik_from:ik_to].copy(),
                 linear_k=linear_k[ik_from:ik_to].copy(),
                 fermi_energy=self.fermi_energy if self.fermi_energy else None,
                 start_label=self.labels[i_from],
@@ -348,7 +339,7 @@ class BandStructure:
             npt.ArrayLike: Occupations array.
         """
         fermi_energy = fermi_energy if fermi_energy is not None else self.fermi_energy
-        return fermi.compute_occupations(self.bands, fermi_energy, smearing_type, smearing_width)
+        return occupation.compute_occupations(self.eigenvalues, fermi_energy, smearing_type, smearing_width)
 
     def compute_n_electrons(
         self, smearing_type: str, smearing_width: float, fermi_energy: ty.Optional[float] = None
@@ -364,7 +355,9 @@ class BandStructure:
             float: Fermi energy.
         """
         fermi_energy = fermi_energy if fermi_energy is not None else self.fermi_energy
-        return fermi.compute_n_electrons(self.bands, self.weights, fermi_energy, smearing_type, smearing_width)
+        return occupation.compute_n_electrons(
+            self.eigenvalues, self.weights, fermi_energy, smearing_type, smearing_width
+        )
 
     def find_fermi_energy(self, smearing_type: str, smearing_width: float, n_electrons_tol: float = 1e-6) -> float:
         """Find a Fermi energy that yields the correct number of electrons.
@@ -384,7 +377,7 @@ class BandStructure:
         if self.n_electrons is None:
             raise ValueError("Cannot find the Fermi level if the number of electrons is unknown.")
         return fermi.find_fermi_energy(
-            self.bands, self.weights, smearing_type, smearing_width, self.n_electrons, n_electrons_tol
+            self.eigenvalues, self.weights, smearing_type, smearing_width, self.n_electrons, n_electrons_tol
         )
 
     def compute_smeared_dos(
@@ -400,7 +393,7 @@ class BandStructure:
         Returns:
             npt.ArrayLike: (n_spins, n_energies) array containing the DOS for each spin channel
         """
-        return smeared_dos(energies, self.bands, self.weights, smearing_type, smearing_width)
+        return smeared_dos(energies, self.eigenvalues, self.weights, smearing_type, smearing_width)
 
     def is_metallic(self, tol: float = 1e-6) -> ty.Union[bool, None]:
         """Check if the band structure is metallic.
@@ -413,7 +406,7 @@ class BandStructure:
         """
         if self.fermi_energy is None:
             return None
-        if self.fermi_energy >= np.max(self.bands):
+        if self.fermi_energy >= np.max(self.eigenvalues):
             # All bands are fully-occupied in this case; can't know if the material is a metal or insulator.
             return None
 
@@ -421,7 +414,7 @@ class BandStructure:
         # First reorder the axes to (n_spins, n_bands, n_kpoints)
         # Then reshape the array to (n_spins * n_bands, n_kpoints)
         # The first n_bands rows of the resulting array correspond to spin 0, and the rest to spin 1
-        bands = np.transpose(self.bands, (0, 2, 1)).reshape((self.n_spins * self.n_bands, self.n_kpoints))
+        bands = np.transpose(self.eigenvalues, (0, 2, 1)).reshape((self.n_spins * self.n_bands, self.n_kpoints))
 
         return bool(
             np.any(np.any(bands < self.fermi_energy - tol, axis=1) & np.any(bands > self.fermi_energy + tol, axis=1))
@@ -450,13 +443,13 @@ class BandStructure:
         """
         if self.fermi_energy is None:
             return None
-        if self.fermi_energy >= np.max(self.bands):
-            return np.max(self.bands)
+        if self.fermi_energy >= np.max(self.eigenvalues):
+            return np.max(self.eigenvalues)
         if self.is_metallic():
             return self.fermi_energy
         # Mask the conduction bands and find the maximum of the rest of the bands,
         # i.e. the valence bands
-        return np.max(self.bands[self.bands <= self.fermi_energy])
+        return np.max(self.eigenvalues[self.eigenvalues <= self.fermi_energy])
 
     @property
     def vbm_index(self) -> ty.Optional[tuple[int, int, int]]:
@@ -467,7 +460,7 @@ class BandStructure:
         """
         if self.fermi_energy is None:
             return None
-        return np.where(np.isclose(self.bands, self.vbm))
+        return np.where(np.isclose(self.eigenvalues, self.vbm))
 
     @property
     def cbm(self) -> ty.Optional[float]:
@@ -478,12 +471,12 @@ class BandStructure:
         """
         if self.fermi_energy is None:
             return None
-        if self.fermi_energy >= np.max(self.bands):
-            return np.max(self.bands)
+        if self.fermi_energy >= np.max(self.eigenvalues):
+            return np.max(self.eigenvalues)
         if self.is_metallic():
             return self.fermi_energy
         # See `vbm`
-        return np.min(self.bands[self.bands >= self.fermi_energy])
+        return np.min(self.eigenvalues[self.eigenvalues >= self.fermi_energy])
 
     @property
     def cbm_index(self) -> ty.Optional[tuple[npt.ArrayLike]]:
@@ -494,7 +487,7 @@ class BandStructure:
         """
         if self.fermi_energy is None:
             return None
-        return np.where(np.isclose(self.bands, self.cbm))
+        return np.where(np.isclose(self.eigenvalues, self.cbm))
 
     @property
     def band_gap(self) -> ty.Optional[float]:

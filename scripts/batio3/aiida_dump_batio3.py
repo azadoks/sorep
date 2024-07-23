@@ -1,4 +1,6 @@
 # %%
+import json
+
 from aiida import load_profile, orm
 import h5py
 import numpy as np

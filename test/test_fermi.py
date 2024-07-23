@@ -10,8 +10,8 @@ import sorep
 def test_compute_occupations(bandstructure):
     """Test `sorep.fermi.compute_occupations."""
     bandstructure, smearing_type, smearing_width = bandstructure
-    occupations = sorep.fermi.compute_occupations(
-        bands=bandstructure.bands,
+    occupations = sorep.occupation.compute_occupations(
+        eigenvalues=bandstructure.eigenvalues,
         fermi_energy=bandstructure.fermi_energy,
         smearing_type=smearing_type,
         smearing_width=smearing_width,
@@ -24,7 +24,7 @@ def test_compute_n_electrons(bandstructure):
     """Test `sorep.fermi.compute_n_electrons`."""
     bandstructure, smearing_type, smearing_width = bandstructure
     n_electrons = sorep.fermi.compute_n_electrons(
-        bands=bandstructure.bands,
+        eigenvalues=bandstructure.eigenvalues,
         weights=bandstructure.weights,
         fermi_energy=bandstructure.fermi_energy,
         smearing_type=smearing_type,
@@ -38,7 +38,7 @@ def test_compute_n_electrons_derivative(bandstructure):
     """Test `sorep.fermi.compute_n_electrons_derivative`."""
     bandstructure, smearing_type, smearing_width = bandstructure
     n_electrons_derivative = sorep.fermi.compute_n_electrons_derivative(
-        bands=bandstructure.bands,
+        eigenvalues=bandstructure.eigenvalues,
         weights=bandstructure.weights,
         fermi_energy=bandstructure.fermi_energy,
         smearing_type=smearing_type,
@@ -47,7 +47,7 @@ def test_compute_n_electrons_derivative(bandstructure):
 
     expected = jax.grad(
         lambda eF: sorep.fermi.compute_n_electrons(
-            bands=bandstructure.bands,
+            eigenvalues=bandstructure.eigenvalues,
             weights=bandstructure.weights,
             fermi_energy=eF,
             smearing_type=smearing_type,
@@ -63,7 +63,7 @@ def test_compute_n_electrons_2nd_derivative(bandstructure):
     """Test `sorep.fermi.compute_n_electrons_derivative`."""
     bandstructure, smearing_type, smearing_width = bandstructure
     n_electrons_2nd_derivative = sorep.fermi.compute_n_electrons_2nd_derivative(
-        bands=bandstructure.bands,
+        eigenvalues=bandstructure.eigenvalues,
         weights=bandstructure.weights,
         fermi_energy=bandstructure.fermi_energy,
         smearing_type=smearing_type,
@@ -72,7 +72,7 @@ def test_compute_n_electrons_2nd_derivative(bandstructure):
 
     expected = -jax.hessian(  # pylint: disable=invalid-unary-operand-type
         lambda eF: sorep.fermi.compute_n_electrons(
-            bands=bandstructure.bands,
+            eigenvalues=bandstructure.eigenvalues,
             weights=bandstructure.weights,
             fermi_energy=eF,
             smearing_type=smearing_type,
@@ -88,7 +88,7 @@ def test_find_fermi_energy(bandstructure):
     """Test `sorep.fermi.find_fermi_energy`."""
     bandstructure, smearing_type, smearing_width = bandstructure
     bands = sorep.BandStructure(
-        bands=bandstructure.bands,
+        eigenvalues=bandstructure.bands,
         kpoints=bandstructure.kpoints,
         weights=bandstructure.weights,
         cell=bandstructure.cell,
@@ -97,7 +97,7 @@ def test_find_fermi_energy(bandstructure):
         n_electrons=bandstructure.n_electrons,
     )
     fermi_energy = sorep.fermi.find_fermi_energy(
-        bands=bandstructure.bands,
+        eigenvalues=bandstructure.bands,
         weights=bandstructure.weights,
         n_electrons=bandstructure.n_electrons,
         smearing_type=smearing_type,
@@ -105,7 +105,7 @@ def test_find_fermi_energy(bandstructure):
     )
 
     assert sorep.fermi.compute_n_electrons(
-        bands=bandstructure.bands,
+        eigenvalues=bandstructure.eigenvalues,
         weights=bandstructure.weights,
         fermi_energy=fermi_energy,
         smearing_type=smearing_type,

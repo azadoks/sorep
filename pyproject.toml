@@ -36,7 +36,7 @@ dependencies = [
     "importlib-resources~=6.4.0",
     "numpy>=1.21.0",
     "pyscf~=2.4",
-    "scipy~=1.14.0",
+    "scipy>=1.13.0",
     "spglib~=2.5",
 ]
 
@@ -114,4 +114,10 @@ good-names = [
     'dk',
     'ef',
     'ne',
+]
+extension-pkg-allow-list = [
+    'sorep.smearing.cython',
+    'sorep.smearing.cython.ufuncs',
+    'sorep.occupation.cython',
+    'sorep.dos.cython',
 ]

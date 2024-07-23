@@ -18,7 +18,7 @@ class BandPathSegment:
 
     def __init__(
         self,
-        bands: npt.ArrayLike,
+        eigenvalues: npt.ArrayLike,
         linear_k: ty.Optional[npt.ArrayLike],
         fermi_energy: ty.Optional[float] = None,
         start_label: ty.Optional[str] = None,
@@ -26,7 +26,7 @@ class BandPathSegment:
         start_index: ty.Optional[int] = None,
         stop_index: ty.Optional[int] = None,
     ):
-        self.bands = bands
+        self.eigenvalues = eigenvalues
         self.linear_k = linear_k
         self.fermi_energy = fermi_energy
         self.start_label = start_label
@@ -59,7 +59,7 @@ class BandPathSegment:
         dk /= ANGSTROM_TO_BOHR
         cbm *= EV_TO_HARTREE
         vbm *= EV_TO_HARTREE
-        bands = self.bands * EV_TO_HARTREE
+        bands = self.eigenvalues * EV_TO_HARTREE
 
         axis = 1  # axes are (spins, kpoints, bands)
         spacing = dk
@@ -105,7 +105,7 @@ class BandPathSegment:
         dk /= ANGSTROM_TO_BOHR
         cbm *= EV_TO_HARTREE
         vbm *= EV_TO_HARTREE
-        bands = self.bands * EV_TO_HARTREE
+        eigenvalues = self.eigenvalues * EV_TO_HARTREE
         fermi_energy = self.fermi_energy * EV_TO_HARTREE
         smearing_width = smearing_width * EV_TO_HARTREE
 
@@ -119,7 +119,9 @@ class BandPathSegment:
             # Get all bands which are completely above the Fermi energy
             # from all spin channels and stack them together into a single
             # array of shape (n_kpoints, n_bands).
-            conduction = np.hstack([bands_spin[:, np.all(bands_spin > fermi_energy, axis=0)] for bands_spin in bands])
+            conduction = np.hstack(
+                [bands_spin[:, np.all(bands_spin > fermi_energy, axis=0)] for bands_spin in eigenvalues]
+            )
             conduction_curvature = d2_dk2(conduction)
             conduction_occupations = smearing_cls(cbm, smearing_width).occupation(conduction)
             # Integrate over k (axis 0), sum over bands (axis 1)
@@ -128,7 +130,9 @@ class BandPathSegment:
                 / sp.integrate.simpson(y=(conduction_occupations * conduction_curvature), dx=dk, axis=0).sum()
             )
 
-            valence = np.hstack([bands_spin[:, np.all(bands_spin < fermi_energy, axis=0)] for bands_spin in bands])
+            valence = np.hstack(
+                [bands_spin[:, np.all(bands_spin < fermi_energy, axis=0)] for bands_spin in eigenvalues]
+            )
             valence_curvature = d2_dk2(valence)
             # Here, we need to invert the center and argument of the occupation function
             # to occupy down from the VBM into the valence as if we were occupying up

@@ -1,10 +1,11 @@
 # %%
+from collections.abc import MutableMapping
 from datetime import datetime
 import json
 import pathlib as pl
 
 from aiida import load_profile, orm, plugins
-from ase.io.extxyz import write_extxyz
+import h5py
 import numpy as np
 import pandas as pd
 from qe_tools import CONSTANTS
@@ -50,7 +51,9 @@ OUTPUT_KWARGS = {
     "edge_filters": {"label": "output_parameters"},
     "project": [
         "attributes.wfc_cutoff",
+        "attributes.wfc_cutoff_units",
         "attributes.rho_cutoff",
+        "attributes.rho_cutoff_units",
         "attributes.volume",
         "attributes.number_of_species",
         "attributes.number_of_atoms",
@@ -63,6 +66,7 @@ OUTPUT_KWARGS = {
         "attributes.lsda",
         "attributes.do_magnetization",
         "attributes.fermi_energy",
+        "attributes.fermi_energy_units",
         "attributes.wall_time_seconds",
         "attributes.dft_exchange_correlation",
         "attributes.creator_version",
@@ -77,10 +81,60 @@ INPUT_KWARGS = {
     "project": ["attributes.SYSTEM.occupations", "attributes.SYSTEM.smearing", "attributes.SYSTEM.degauss"],
 }
 
+with open("../data/mc3d/source_to_mc3d_id.json", "r", encoding="utf-8") as fp:
+    SOURCE_TO_MC3D = json.load(fp)
+
 DATA_DIR = pl.Path("../data/mc3d/")
 
 
 # %%
+def _flatten(dictionary, parent_key="", separator="__"):
+    items = []
+    for key, value in dictionary.items():
+        new_key = parent_key + separator + key if parent_key else key
+        if isinstance(value, MutableMapping):
+            items.extend(_flatten(value, new_key, separator=separator).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)
+
+
+def _get_id(res: dict) -> str:
+    # Source database
+    if res["structure"]["extras.source.database"] is not None:
+        source_db = res["structure"]["extras.source.database"]
+    else:
+        source_db = ""
+    # Source database version
+    if res["structure"]["extras.source.version"] is not None:
+        source_version = res["structure"]["extras.source.version"]
+    else:
+        source_version = ""
+    # ID in source database
+    if res["structure"]["extras.source.id"] is not None:
+        source_id = res["structure"]["extras.source.id"]
+    elif res["structure"]["extras.source_id"] is not None:
+        source_id = res["structure"]["extras.source_id"]
+    else:
+        source_id = ""
+    source_id = str(source_id)
+    if source_id.startswith("mp-"):
+        source_id = source_id[3:]
+        source_db = "mp"
+    # Fall back to structure UUID
+    if (source_id == "None") and (source_db == "None") and (source_version == "None"):
+        source_id = res["structure"]["uuid"]
+        source_db = ""
+        source_version = ""
+    # Construct full source ID to map to MC3D ID
+    if source_db == "mp":
+        id_ = "-".join([source_db, source_id])
+    else:
+        full_source_id = "|".join([source_db, source_version, source_id])
+        id_ = SOURCE_TO_MC3D.get(full_source_id, full_source_id)
+    return id_, source_db, source_version, source_id
+
+
 def _get_metadata(res: dict) -> dict:
     """Construct metadata dictionary from a query result
 
@@ -90,73 +144,99 @@ def _get_metadata(res: dict) -> dict:
     Returns:
         dict: Metadata dictionary.
     """
-    id_ = res["structure"].get("extras.source.id", "unknown_id")
-    id_ = "unknown_id" if id_ is None else id_
-    id_ = id_[3:] if id_.startswith("mp-") else id_
-
-    db = res["structure"].get("extras.source.database", "unknown_db")
-    db = "unknown_db" if db is None else db
-
-    db_version = res["structure"].get("extras.source.version", "unknown_version")
-    db_version = "unknown_version" if db_version is None else db_version
-
-    if (id_ == "unknown_id") and (db == "unknown_db") and (db_version == "unknown_version"):
-        sorep_id = res["structure"]["uuid"]
-    else:
-        sorep_id = "|".join([db, db_version, id_])
-
-    degauss = res["input"]["attributes.SYSTEM.degauss"]
-    if degauss is not None:
-        res["input"]["attributes.SYSTEM.degauss"] = degauss * CONSTANTS.ry_to_ev
-
+    id_, source_db, source_version, source_id = _get_id(res)
     return {
-        # Calculation Node
-        "calculation_uuid": res["calculation"]["uuid"],
-        "calculation_ctime": str(res["calculation"]["ctime"]),
-        # Structure Node + extras
-        "structure_uuid": res["structure"]["uuid"],
-        "formula_hill": res["structure"]["extras.formula_hill"],
-        "spacegroup_international": res["structure"]["extras.spacegroup_international"],
-        "matproj_duplicate": res["structure"]["extras.matproj_duplicate"],
-        "sorep_id": sorep_id,
-        "structure_source_database": db,
-        "structure_source_database_version": db_version,
-        "structure_source_database_id": id_,
-        # Bands Node
-        "bands_uuid": res["bands"]["uuid"],
-        # Output parameters
-        **{key.split(".")[-1]: value for (key, value) in res["output"].items()},
-        # Input parameters
-        **{key.split(".")[-1]: value for (key, value) in res["input"].items()},
+        "calculation": {
+            "uuid": res["calculation"]["uuid"],
+            "ctime": str(res["calculation"]["ctime"]),
+            "wall_time_seconds": (
+                -1.0
+                if res["output"]["attributes.wall_time_seconds"] is None
+                else res["output"]["attributes.wall_time_seconds"]
+            ),
+            "creator_version": res["output"]["attributes.creator_version"],
+            "dft_exchange_correlation": res["output"]["attributes.dft_exchange_correlation"],
+            "wfc_cutoff": res["output"]["attributes.wfc_cutoff"],
+            "wfc_cutoff_units": res["output"]["attributes.wfc_cutoff_units"],
+            "rho_cutoff": res["output"]["attributes.rho_cutoff"],
+            "rho_cutoff_units": res["output"]["attributes.rho_cutoff_units"],
+        },
+        "structure": {
+            "uuid": res["structure"]["uuid"],
+            "id": id_,
+            "formula_hill": res["structure"]["extras.formula_hill"],
+            "spacegroup_international": res["structure"]["extras.spacegroup_international"],
+            "matproj_duplicate": (
+                ""
+                if res["structure"]["extras.matproj_duplicate"] is None
+                else res["structure"]["extras.matproj_duplicate"]
+            ),
+            "source_database": source_db,
+            "source_version": source_version,
+            "source_id": source_id,
+            "volume": res["output"]["attributes.volume"],
+            "volume_units": "angstrom^3",
+            "number_of_species": res["output"]["attributes.number_of_species"],
+            "number_of_atoms": res["output"]["attributes.number_of_atoms"],
+        },
+        "bands": {
+            "uuid": res["bands"]["uuid"],
+            "qe_fermi_energy": res["output"]["attributes.fermi_energy"],
+            "qe_fermi_energy_units": res["output"]["attributes.fermi_energy_units"],
+            "number_of_electrons": res["output"]["attributes.number_of_electrons"],
+            "number_of_bands": res["output"]["attributes.number_of_bands"],
+            "number_of_k_points": res["output"]["attributes.number_of_k_points"],
+            "number_of_spin_components": res["output"]["attributes.number_of_spin_components"],
+            "monkhorst_pack_grid": (
+                []
+                if res["output"]["attributes.monkhorst_pack_grid"] is None
+                else res["output"]["attributes.monkhorst_pack_grid"]
+            ),
+            "monkhorst_pack_offset": (
+                []
+                if res["output"]["attributes.monkhorst_pack_offset"] is None
+                else res["output"]["attributes.monkhorst_pack_offset"]
+            ),
+            "smearing": res["input"]["attributes.SYSTEM.smearing"],
+            "occupations": res["input"]["attributes.SYSTEM.occupations"],
+            "degauss": (
+                0.0
+                if res["input"]["attributes.SYSTEM.degauss"] is None
+                else res["input"]["attributes.SYSTEM.degauss"] * CONSTANTS.ry_to_ev
+            ),
+            "degauss_units": "eV",
+        },
     }
 
 
-def _get_bands_arrays(res: dict, recompute_fermi_occupations: bool = True) -> dict:
-    metadata = _get_metadata(res)
+def _get_bands_arrays(res: dict) -> dict:
+    metadata = _get_metadata(res)["bands"]
     bands_arrays = {
-        "bands": res["bands"]["*"].get_array("bands"),
+        "eigenvalues": res["bands"]["*"].get_array("bands"),
         "kpoints": res["bands"]["*"].get_array("kpoints"),
         "weights": res["bands"]["*"].get_array("weights"),
-        "occupations": res["bands"]["*"].get_array("occupations"),
+        "cell": np.array(res["structure"]["*"].cell),
         "labels": res["bands"].get("attributes.labels", []),
         "label_numbers": np.array(res["bands"].get("attributes.label_numbers", []), dtype=int),
-        "fermi_energy": metadata["fermi_energy"],
-        "n_electrons": metadata["n_electrons"],
+        "n_electrons": metadata["number_of_electrons"],
+        # Completely ignore QE Fermi energy and occupations -- often garbage or missing (<=v6.8 w/ cold or single_shot)
+        # "fermi_energy": metadata["qe_fermi_energy"],
+        # "occupations": res["bands"]["*"].get_array("occupations"),
     }
     # Add a spin dimension if missing
-    for key in ("bands", "occupations"):
-        bands_arrays[key] = bands_arrays[key] if bands_arrays[key].ndim == 3 else np.expand_dims(bands_arrays[key], 0)
+    bands_arrays["bands"] = (
+        bands_arrays["bands"] if bands_arrays["bands"].ndim == 3 else np.expand_dims(bands_arrays["bands"], 0)
+    )
 
-    if recompute_fermi_occupations:
-        bandstructure = sorep.BandStructure(**bands_arrays, n_electrons=metadata["number_of_electrons"])
-        fermi_energy = bandstructure.find_fermi_energy(metadata["smearing"], metadata["degauss"], n_electrons_tol=1e-4)
-        # Move the Fermi energy to mid-gap if insulating
-        bandstructure.fermi_energy = fermi_energy
-        if bandstructure.is_insulating():
-            fermi_energy = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
-        occupations = bandstructure.compute_occupations(metadata["smearing"], metadata["degauss"], fermi_energy)
-        bands_arrays["fermi_energy"] = fermi_energy
-        bands_arrays["occupations"] = occupations
+    bandstructure = sorep.BandStructure(**bands_arrays)
+    fermi_energy = bandstructure.find_fermi_energy(metadata["smearing"], metadata["degauss"], n_electrons_tol=1e-4)
+    # Move the Fermi energy to mid-gap if insulating
+    bandstructure.fermi_energy = fermi_energy
+    if bandstructure.is_insulating():
+        fermi_energy = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
+    occupations = bandstructure.compute_occupations(metadata["smearing"], metadata["degauss"], fermi_energy)
+    bands_arrays["fermi_energy"] = fermi_energy
+    bands_arrays["occupations"] = occupations
 
     return bands_arrays
 
@@ -167,65 +247,29 @@ def _get_atoms_arrays(res: dict) -> dict:
     return {**atoms.arrays, "cell": atoms.cell.array, "pbc": atoms.pbc}
 
 
-def _dump_result(res: dict, calc_type: str, recompute_fermi_occupations: bool = True, dry_run: bool = False) -> None:
-    """Write the structure, bands, and metadata for a calculation from a query result dictionary.
-
-    Args:
-        res (dict): Result dictionary.
-        calc_type (str): Calculation type (used to name sub-directory under calculation ID)
-        recompute_fermi_occupations (bool, optional): Recompute the Fermi energy and occupations. Defaults to True.
-        dry_run (bool, optional): Perform all processing but do not write any files. Defaults to False.
-    """
+def _hdf_result(hdf_group, res: dict) -> None:
     metadata = _get_metadata(res)
 
-    structure_calc_type_dir = DATA_DIR / metadata["sorep_id"] / calc_type
-    # count = len(list(structure_calc_type_dir.glob("*")))
-    # dest_dir = structure_calc_type_dir / f"{count}"
-    if not dry_run:
-        structure_calc_type_dir.mkdir(exist_ok=False, parents=True)
-
-    bands_arrays = {
-        "eigenvalues": res["bands"]["*"].get_array("bands"),
-        "kpoints": res["bands"]["*"].get_array("kpoints"),
-        "weights": res["bands"]["*"].get_array("weights"),
-        "occupations": res["bands"]["*"].get_array("occupations"),
-        "labels": res["bands"].get("attributes.labels", []),
-        "label_numbers": np.array(res["bands"].get("attributes.label_numbers", []), dtype=int),
-    }
-
-    if recompute_fermi_occupations:
-        bandstructure = sorep.BandStructure(**bands_arrays, n_electrons=metadata["number_of_electrons"])
-        fermi_energy = bandstructure.find_fermi_energy(metadata["smearing"], metadata["degauss"], n_electrons_tol=1e-4)
-        # Move the Fermi energy to mid-gap if insulating
-        bandstructure.fermi_energy = fermi_energy
-        if bandstructure.is_insulating():
-            fermi_energy = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
-        occupations = bandstructure.compute_occupations(metadata["smearing"], metadata["degauss"], fermi_energy)
-        metadata["fermi_energy"] = fermi_energy
-        bands_arrays["occupations"] = occupations
-
-    if not dry_run:
-        # Write structure
-        with open(structure_calc_type_dir / "structure.xyz", "w", encoding="utf-8") as fp:
-            write_extxyz(fp, res["structure"]["*"].get_ase())
-        # Write bands
-        np.savez_compressed(file=structure_calc_type_dir / "bands.npz", **bands_arrays)
-        # Write metadata
-        with open(structure_calc_type_dir / "metadata.json", "w", encoding="utf-8") as fp:
-            json.dump(metadata, fp)
-
-
-def _hdf_result(hdf_group, res: dict, recompute_fermi_occupations: bool = True) -> None:
-    for key, value in _get_metadata(res).items():
+    for key, value in metadata["calculation"].items():
         hdf_group.attrs[key] = value
 
     bands_group = hdf_group.create_group("bands")
-    for key, value in _get_bands_arrays(res, recompute_fermi_occupations=recompute_fermi_occupations).items():
-        bands_group.create_dataset(key, data=value, compression="gzip", shuffle=True)
+    for key, value in metadata["bands"].items():
+        bands_group.attrs[key] = value
+    for key, value in _get_bands_arrays(res).items():
+        if isinstance(value, (np.ndarray, list)):
+            bands_group.create_dataset(key, data=value, compression="gzip", shuffle=True)
+        else:
+            bands_group.create_dataset(key, data=value)
 
     atoms_group = hdf_group.create_group("atoms")
+    for key, value in metadata["structure"].items():
+        atoms_group.attrs[key] = value
     for key, value in _get_atoms_arrays(res).items():
-        atoms_group.create_dataset(key, data=value, compression="gzip", shuffle=True)
+        if isinstance(value, (np.ndarray, list)):
+            atoms_group.create_dataset(key, data=value, compression="gzip", shuffle=True)
+        else:
+            atoms_group.create_dataset(key, data=value)
 
 
 def _single_shot_query() -> list[dict]:
@@ -279,15 +323,20 @@ def _bands_query(single_shot_qr: list[dict]) -> list[dict]:
 
 
 def _deduplicate(qr: list[dict]) -> list[dict]:
-    metadata_df = pd.DataFrame([_get_metadata(r) for r in qr])
-    metadata_df["calculation_ctime"] = metadata_df["calculation_ctime"].apply(datetime.fromisoformat)
-    metadata_df = metadata_df.sort_values(by="calculation_ctime")  # oldest first
-    metadata_df = metadata_df.drop_duplicates(subset="sorep_id", keep="last")  # get the newest
+    metadata_df = pd.DataFrame([_flatten(_get_metadata(r)) for r in qr])
+    metadata_df["calculation__ctime"] = metadata_df["calculation__ctime"].apply(datetime.fromisoformat)
+    metadata_df = metadata_df.sort_values(by="calculation__ctime")  # oldest first
+    metadata_df = metadata_df.drop_duplicates(subset="structure__id", keep="last")  # get the newest
+    metadata_df = metadata_df[
+        metadata_df.structure__id.apply(lambda x: x.startswith("mc3d"))
+    ]  # keep only MC3D structures
     return [qr[i] for i in metadata_df.index]
 
 
 # %%
-def main(dry_run: bool = False, recompute_fermi_occupations: bool = True):
+def main(dry_run: bool = False):
+    f = h5py.File(DATA_DIR / "data_hdf.h5", "w")
+
     name = "SINGLE-SHOT"
     print(f"[{name:9s}] Querying for calculations...")
     single_shot_qr = _single_shot_query()
@@ -296,9 +345,12 @@ def main(dry_run: bool = False, recompute_fermi_occupations: bool = True):
     single_shot_qr = _deduplicate(single_shot_qr)
     print(f"[{name:9s}] Unique {len(single_shot_qr)}")
     for res in tqdm(single_shot_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
-        _dump_result(
-            res, calc_type="single_shot", recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run
-        )
+        id_, *_ = _get_id(res)
+        try:
+            g = f.create_group(f"{id_}/single_shot")
+            _hdf_result(g, res)
+        except ValueError as e:
+            raise ValueError(f"Error for {id_}: {id_}/single_shot") from e
     print()
 
     name = "SCF"
@@ -309,7 +361,9 @@ def main(dry_run: bool = False, recompute_fermi_occupations: bool = True):
     scf_qr = _deduplicate(scf_qr)
     print(f"[{name:9s}] Unique {len(scf_qr)}")
     for res in tqdm(scf_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
-        _dump_result(res, calc_type="scf", recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
+        id_, *_ = _get_id(res)
+        g = f.create_group(f"{id_}/scf")
+        _hdf_result(g, res)
     print()
 
     name = "BANDS"
@@ -320,7 +374,9 @@ def main(dry_run: bool = False, recompute_fermi_occupations: bool = True):
     bands_qr = _deduplicate(bands_qr)
     print(f"[{name:9s}] Unique {len(bands_qr)}")
     for res in tqdm(bands_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
-        _dump_result(res, calc_type="bands", recompute_fermi_occupations=recompute_fermi_occupations, dry_run=dry_run)
+        id_, *_ = _get_id(res)
+        g = f.create_group(f"{id_}/bands")
+        _hdf_result(g, res)
 
     return single_shot_qr, scf_qr, bands_qr
 

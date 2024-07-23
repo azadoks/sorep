@@ -6,186 +6,23 @@ import numpy as np
 import numpy.typing as npt
 import scipy as sp
 
-from .smearing import Cold, Delta, FermiDirac, Gaussian, smearing_from_name
+# from .occupation import compute_n_electrons, compute_n_electrons_derivative, compute_n_electrons_2nd_derivative
+from .occupation import compute_n_electrons_2nd_derivative_python as compute_n_electrons_2nd_derivative
+from .occupation import compute_n_electrons_derivative_python as compute_n_electrons_derivative
+from .occupation import compute_n_electrons_python as compute_n_electrons
 
 __all__ = (
     "find_fermi_energy",
     "find_fermi_energy_zero_temp",
     "find_fermi_energy_bisection",
     "find_fermi_energy_two_stage",
-    "compute_occupations",
-    "compute_occupations_derivative",
-    "compute_occupations_2nd_derivative",
-    "compute_n_electrons",
-    "compute_n_electrons_derivative",
-    "compute_n_electrons_2nd_derivative",
 )
 
-
-def get_max_occupation(n_spins: int) -> float:
-    """Get the maximum occupation for a given number of spin channels.
-
-    Args:
-        n_spins (int): number of spin channels.
-
-    Raises:
-        ValueError: if the maximum occupation is unknown for the given number of spin channels.
-
-    Returns:
-        float: maximum occupation.
-    """
-    if n_spins == 1:
-        max_occupation = 2.0
-    elif n_spins == 2:
-        max_occupation = 1.0
-    else:
-        raise ValueError(f"Unknown maximum occupation for n_spins={n_spins}")
-    return max_occupation
-
-
-def compute_occupations(
-    bands: npt.ArrayLike,
-    fermi_energy: float,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-) -> npt.ArrayLike:
-    """Compute the occupations given a Fermi energy and smearing.
-
-    Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
-        fermi_energy (float): fermi energy.
-        smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
-        smearing_width (float): smearing width.
-
-    Raises:
-        ValueError: if maximum occupation is unknown.
-
-    Returns:
-        npt.ArrayLike: (n_spins, n_kpoints, n_bands) occupations array.
-    """
-    max_occs = get_max_occupation(bands.shape[0])
-    smearing = smearing_from_name(smearing_type)(center=fermi_energy, width=smearing_width)
-    return max_occs * smearing.occupation(bands)
-
-
-def compute_occupations_derivative(
-    bands: npt.ArrayLike,
-    fermi_energy: float,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-) -> npt.ArrayLike:
-    """Compute the derivative of the occupations with respect to the Fermi energy.
-
-    Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
-        fermi_energy (float): fermi energy.
-        smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
-        smearing_width (float): smearing width.
-
-    Returns:
-        npt.ArrayLike: (n_spins, n_kpoints, n_bands) occupations derivative array.
-    """
-    max_occs = get_max_occupation(bands.shape[0])
-    smearing = smearing_from_name(smearing_type)(center=fermi_energy, width=smearing_width)
-    return max_occs / smearing_width * smearing.occupation_derivative(bands)
-
-
-def compute_occupations_2nd_derivative(
-    bands: npt.ArrayLike,
-    fermi_energy: float,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-) -> npt.ArrayLike:
-    """Compute the second derivative of the occupations with respect to the Fermi energy.
-
-    Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
-        fermi_energy (float): fermi energy.
-        smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
-        smearing_width (float): smearing width.
-
-    Returns:
-        npt.ArrayLike: (n_spins, n_kpoints, n_bands) occupations derivative array.
-    """
-    max_occs = get_max_occupation(bands.shape[0])
-    smearing = smearing_from_name(smearing_type)(center=fermi_energy, width=smearing_width)
-    return max_occs / smearing_width**2 * smearing.occupation_2nd_derivative(bands)
-
-
-def compute_n_electrons(
-    bands: npt.ArrayLike,
-    weights: npt.ArrayLike,
-    fermi_energy: float,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-) -> float:
-    r"""Compute the number of electrons (total occupation) given a Fermi energy and smearing.
-
-    .. math::
-        N_{\mathrm{el.}} = \sum_{\sigma,\mathbf{k},\nu}{\theta_{\sigma,\mathbf{k},\nu} w_{\mathbf{k}}}
-
-    Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
-        weights (npt.ArrayLike): (n_kpoints, ) k-point weights array.
-        fermi_energy (float): Fermi energy.
-        smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
-        smearing_width (float): smearing width.
-
-    Returns:
-        float: number of electrons.
-    """
-    occupations = compute_occupations(bands, fermi_energy, smearing_type, smearing_width)
-    return np.einsum("skn,k->skn", occupations, weights).sum()
-
-
-def compute_n_electrons_derivative(
-    bands: npt.ArrayLike,
-    weights: npt.ArrayLike,
-    fermi_energy: float,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-):
-    """Compute the derivative of the number of electrons (total occupation) with respect to the Fermi energy.
-
-    Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
-        weights (npt.ArrayLike): (n_kpoints, ) k-point weights array.
-        fermi_energy (float): Fermi energy.
-        smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
-        smearing_width (float): smearing width.
-
-    Returns:
-        float: d[Nelec]/d[eF].
-    """
-    occupations_derivative = compute_occupations_derivative(bands, fermi_energy, smearing_type, smearing_width)
-    return np.einsum("skn,k->skn", occupations_derivative, weights).sum()
-
-
-def compute_n_electrons_2nd_derivative(
-    bands: npt.ArrayLike,
-    weights: npt.ArrayLike,
-    fermi_energy: float,
-    smearing_type: ty.Union[str, int],
-    smearing_width: float,
-):
-    """Compute the second derivative of the number of electrons (total occupation) with respect to the Fermi energy.
-
-    Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
-        weights (npt.ArrayLike): (n_kpoints, ) k-point weights array.
-        fermi_energy (float): Fermi energy.
-        smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
-        smearing_width (float): smearing width.
-
-    Returns:
-        float: d2[Nelec]/d[eF]2.
-    """
-    occupations_curvature = compute_occupations_2nd_derivative(bands, fermi_energy, smearing_type, smearing_width)
-    return np.einsum("skn,k->skn", occupations_curvature, weights).sum()
+from .smearing import Cold, Delta, FermiDirac, Gaussian, smearing_from_name
 
 
 def find_fermi_energy(  # pylint: disable=too-many-arguments
-    bands: npt.ArrayLike,
+    eigenvalues: npt.ArrayLike,
     weights: npt.ArrayLike,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
@@ -195,7 +32,7 @@ def find_fermi_energy(  # pylint: disable=too-many-arguments
     """Find the Fermi level by bisection, two-stage algorithm, or at zero temperature depending on the smearing type.
 
     Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
+        eigenvalues (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
         weights (npt.ArrayLike): (n_kpoints, ) k-point weights array.
         smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
         smearing_width (float): smearing width.
@@ -210,14 +47,14 @@ def find_fermi_energy(  # pylint: disable=too-many-arguments
     """
     smearing_cls = smearing_from_name(smearing_type)
     if smearing_cls is Delta:
-        fermi_energy = find_fermi_energy_zero_temp(bands, weights, n_electrons)
+        fermi_energy = find_fermi_energy_zero_temp(eigenvalues, weights, n_electrons)
     elif smearing_cls in (Gaussian, FermiDirac):
         fermi_energy = find_fermi_energy_bisection(
-            bands, weights, smearing_type, smearing_width, n_electrons, n_electrons_tol
+            eigenvalues, weights, smearing_type, smearing_width, n_electrons, n_electrons_tol
         )
     elif smearing_cls is Cold:
         fermi_energy = find_fermi_energy_two_stage(
-            bands, weights, smearing_type, smearing_width, n_electrons, n_electrons_tol
+            eigenvalues, weights, smearing_type, smearing_width, n_electrons, n_electrons_tol
         )
     else:
         raise ValueError(f"Unknown smearing class: {smearing_cls}")
@@ -225,7 +62,7 @@ def find_fermi_energy(  # pylint: disable=too-many-arguments
 
 
 def find_fermi_energy_zero_temp(
-    bands: npt.ArrayLike,
+    eigenvalues: npt.ArrayLike,
     weights: npt.ArrayLike,
     n_electrons: int,
 ) -> float:
@@ -235,7 +72,7 @@ def find_fermi_energy_zero_temp(
     band minimum.
 
     Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
+        eigenvalues (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
         weights (npt.ArrayLike): (n_kpoints, ) k-point weights array.
         n_electrons (int): target number of electrons.
 
@@ -247,14 +84,14 @@ def find_fermi_energy_zero_temp(
     """
     total_weight = weights.sum()
 
-    if n_electrons % (bands.shape[0] * bands.shape[2] * total_weight) != 0:
+    if n_electrons % (eigenvalues.shape[0] * eigenvalues.shape[2] * total_weight) != 0:
         raise ValueError(f"{n_electrons} electrons cannot be obtained with no partial occupations.")
 
     return NotImplementedError("Zero temperature Fermi level not implemented.")
 
 
 def find_fermi_energy_bisection(  # pylint: disable=too-many-arguments
-    bands: npt.ArrayLike,
+    eigenvalues: npt.ArrayLike,
     weights: npt.ArrayLike,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
@@ -266,7 +103,7 @@ def find_fermi_energy_bisection(  # pylint: disable=too-many-arguments
     Adapated from DFTK.jl/src/occupation.jl.
 
     Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
+        eigenvalues (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
         weights (npt.ArrayLike): (n_kpoints, ) k-point weights array.
         smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
         smearing_width (float): smearing width.
@@ -278,12 +115,12 @@ def find_fermi_energy_bisection(  # pylint: disable=too-many-arguments
     """
 
     def objective(ef):
-        ne = compute_n_electrons(bands, weights, ef, smearing_type, smearing_width)
+        ne = compute_n_electrons(eigenvalues, weights, ef, smearing_type, smearing_width)
         return ne - n_electrons
 
     # Get rough bounds for the Fermi level
-    e_min = bands.min() - 10 * smearing_width
-    e_max = bands.max() + 10 * smearing_width
+    e_min = eigenvalues.min() - 10 * smearing_width
+    e_max = eigenvalues.max() + 10 * smearing_width
 
     obj_upper = objective(e_max)
     if (obj_upper < 0) and np.isclose(obj_upper, 0.0, atol=1e-4):
@@ -293,20 +130,78 @@ def find_fermi_energy_bisection(  # pylint: disable=too-many-arguments
         # Note that this is not the same as the Fermi level being the maximum band energy because of smearing
         # However, we'll return the maximum band energy so that the result doesn't depend on the smearing width
         # or our choice of guess bounds (bands.max() + 10 * smearing with)
-        return bands.max()
+        return eigenvalues.max()
 
     fermi_energy = sp.optimize.bisect(objective, e_min, e_max)
     if np.abs(objective(fermi_energy)) > n_electrons_tol:
         raise RuntimeError(f"Failed to find Fermi energy with bisection: {fermi_energy}")
 
-    if fermi_energy >= bands.max():
-        return bands.max()
+    if fermi_energy >= eigenvalues.max():
+        return eigenvalues.max()
 
     return fermi_energy
 
 
+class _TwoStageObjective:
+    def __init__(  # pylint: disable=too-many-arguments
+        self,
+        eigenvalues: npt.ArrayLike,
+        weights: npt.ArrayLike,
+        smearing_type: str,
+        smearing_width: float,
+        n_electrons: float,
+    ):
+        self.eigenvalues: np.ndarray = np.ascontiguousarray(eigenvalues)
+        self.weights: np.ndarray = np.ascontiguousarray(weights)
+        self.smearing_type: str = str(smearing_type)
+        self.smearing_width: float = float(smearing_width)
+        self.n_electrons: float = float(n_electrons)
+        self._ne: float = 0.0
+        self._dne: float = 0.0
+
+    def objective(self, ef: float) -> float:
+        """Objective function for Newton minimization.
+
+        Args:
+            ef (float): Fermi energy
+
+        Returns:
+            float: (n_electrons(ef) - n_electrons_target)^2
+        """
+        self._ne = compute_n_electrons(self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width)
+        return (self._ne - self.n_electrons) ** 2
+
+    def objective_deriv(self, ef: float) -> float:
+        """Derivative of the objective function for Newton minimization.
+
+        Args:
+            ef (float): Fermi energy
+
+        Returns:
+            float: d((n_electrons(ef) - n_electrons_target)^2)/d(ef)
+        """
+        self._dne = compute_n_electrons_derivative(
+            self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width
+        )
+        return 2 * (self._ne - self.n_electrons) * self._dne
+
+    def objective_2nd_deriv(self, ef: float) -> float:
+        """Second derivative of the objective function for Newton minimization.
+
+        Args:
+            ef (float): Fermi energy
+
+        Returns:
+            float: d^2((n_electrons(ef) - n_electrons_target)^2)/d(ef)^2
+        """
+        ddne = compute_n_electrons_2nd_derivative(
+            self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width
+        )
+        return 2 * ((self._ne - self.n_electrons) * ddne + self._dne**2)
+
+
 def find_fermi_energy_two_stage(  # pylint: disable=too-many-arguments
-    bands: npt.ArrayLike,
+    eigenvalues: npt.ArrayLike,
     weights: npt.ArrayLike,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
@@ -320,7 +215,7 @@ def find_fermi_energy_two_stage(  # pylint: disable=too-many-arguments
     Adapated from DFTK.jl/src/occupation.jl.
 
     Args:
-        bands (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
+        eigenvalues (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
         weights (npt.ArrayLike): (n_kpoints, ) k-point weights array.
         smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
         smearing_width (float): smearing width
@@ -330,34 +225,21 @@ def find_fermi_energy_two_stage(  # pylint: disable=too-many-arguments
         float: Fermi energy.
     """
     # Start with bisection and Gaussian smearing
-    bisection_fermi = find_fermi_energy_bisection(bands, weights, "gauss", smearing_width, n_electrons, np.inf)
+    bisection_fermi = find_fermi_energy_bisection(eigenvalues, weights, "gauss", smearing_width, n_electrons, np.inf)
 
     # If the bisection Fermi level is the maximum band energy, return it.
     # As noted in `find_fermi_energy_bisection`, this won't actually give the correct number of electrons
     # at non-zero smearing width, but it's the result that makes sense in this context.
-    if bisection_fermi >= bands.max():
-        return bands.max()
+    if bisection_fermi >= eigenvalues.max():
+        return eigenvalues.max()
 
     # Refine with Newton and the requested smearing (probably cold)
     two_stage_fermi = bisection_fermi
 
-    # Objective function: f(eF) = (total_occupation(eF) - n_electrons)^2
-    def objective(ef):
-        ne = compute_n_electrons(bands, weights, ef, smearing_type, smearing_width)
-        return (ne - n_electrons) ** 2
-
-    # Derivative of the objective function: f'(eF) = 2 * (f(eF) - n_electrons) * f'(eF)
-    def objective_deriv(ef):
-        ne = compute_n_electrons(bands, weights, ef, smearing_type, smearing_width)
-        dne = compute_n_electrons_derivative(bands, weights, ef, smearing_type, smearing_width)
-        return 2 * (ne - n_electrons) * dne
-
-    # Second derivative of the objective function: f''(eF) = 2 * ((f(eF) - n_electrons) * f''(eF) + f'(eF)^2)
-    def objective_2nd_deriv(ef):
-        ne = compute_n_electrons(bands, weights, ef, smearing_type, smearing_width)
-        dne = compute_n_electrons_derivative(bands, weights, ef, smearing_type, smearing_width)
-        ddne = compute_n_electrons_2nd_derivative(bands, weights, ef, smearing_type, smearing_width)
-        return 2 * ((ne - n_electrons) * ddne + dne**2)
+    obj = _TwoStageObjective(eigenvalues, weights, smearing_type, smearing_width, n_electrons)
+    objective = obj.objective
+    objective_deriv = obj.objective_deriv
+    objective_2nd_deriv = obj.objective_2nd_deriv
 
     try:
         if newton_kwargs is None:
