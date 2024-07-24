@@ -4,11 +4,15 @@ import os
 import pathlib as pl
 import typing as ty
 
+from ase import Atoms
 from ase.io import read
 from dscribe.descriptors import SOAP
 import h5py
 import numpy as np
 from tqdm import tqdm
+
+MAT_HDF = pl.Path("../data/mc3d/materials.h5")
+FEAT_HDF = pl.Path("../data/mc3d/features.h5")
 
 
 # %%
@@ -39,25 +43,40 @@ def _equal_params_existing(group, params):
     return None
 
 
-def compute_soap_all(calculation_type: str, params: dict):
-    images = read(f"../data/mc3d_structures_{calculation_type}.xyz", ":")
-    material_ids = [image.info["material_id"] for image in images]
-    for image in images:
-        image.set_atomic_numbers(np.ones(image.get_global_number_of_atoms(), dtype=int))
-    soap_dscribe = SOAP(**params)
-    features = soap_dscribe.create(images, n_jobs=12)
-    return material_ids, features
+# def compute_soap_all(calculation_type: str, params: dict):
+#     images = read(f"../data/mc3d_structures_{calculation_type}.xyz", ":")
+#     material_ids = [image.info["material_id"] for image in images]
+#     for image in images:
+#         image.set_atomic_numbers(np.ones(image.get_global_number_of_atoms(), dtype=int))
+#     soap_dscribe = SOAP(**params)
+#     features = soap_dscribe.create(images, n_jobs=12)
+#     return material_ids, features
+
+
+def load_images(hdf, calculation_type: str):
+    images = []
+    for material in hdf.values():
+        if calculation_type in material:
+            image = Atoms(**{k: v[()] for k, v in material[calculation_type]["atoms"].items()})
+            image.info = dict(material[calculation_type]["atoms"].attrs)
+            images.append(image)
+    return images
 
 
 def main():
-    for calculation_type in ["single_shot", "scf"]:
-        mode = "w" if OVERWRITE_ALL else "a"
-        with h5py.File(f"../data/mc3d_features_{calculation_type}.h5", mode) as f:
-            g_type = f["soap"] if "soap" in f else f.create_group("soap")
+    mode = "w" if OVERWRITE_ALL else "a"
+    with h5py.File(FEAT_HDF, mode) as f_features:
+        for calculation_type in ["single_shot", "scf"]:
+            type_key = f"{calculation_type}/soap"
+            if type_key in f_features.keys():
+                g_type = f_features[type_key]
+            else:
+                g_type = f_features.create_group(type_key)
             for params in SOAP_PARAMS:
                 params = params.copy()
                 # Read in the images for each featurization; they may be modified below to remove species information
-                images = read(f"../data/mc3d_structures_{calculation_type}.xyz", ":")
+                with h5py.File(MAT_HDF, "r") as f_materials:
+                    images = load_images(f_materials, calculation_type)
                 # Construct the species list
                 if not params["species"]:
                     for image in images:
@@ -81,13 +100,13 @@ def main():
                 # Initialize the target arrays in the HDF5 file
                 n_features = soap_dscribe.get_number_of_features()
                 material_ids = g_instance.create_dataset(
-                    "material_id", (len(images),), dtype=h5py.string_dtype(encoding="utf-8", length=None)
+                    "id", (len(images),), dtype=h5py.string_dtype(encoding="utf-8", length=None)
                 )
                 chunk_rows = max(512_000 // np.zeros(n_features).nbytes, 1)
                 chunk_cols = n_features
                 features = g_instance.create_dataset(
-                    "features",
-                    (len(images), n_features),
+                    name="features",
+                    shape=(len(images), n_features),
                     dtype=FEATURES_DTYPE,
                     compression="gzip",
                     chunks=(chunk_rows, chunk_cols),
@@ -97,11 +116,12 @@ def main():
                 feature_chunk = chunk_rows * N_JOBS
                 for i in tqdm(range(0, len(images), feature_chunk), desc="Featurizing chunks: "):
                     image_chunk = images[i : i + feature_chunk]
-                    material_ids[i : i + feature_chunk] = [str(image.info["material_id"]) for image in image_chunk]
+                    material_ids[i : i + feature_chunk] = [str(image.info["id"]) for image in image_chunk]
                     if params.get("sparse", False):
                         features[i : i + feature_chunk] = soap_dscribe.create(image_chunk, n_jobs=N_JOBS).todense()
                     else:
                         features[i : i + feature_chunk] = soap_dscribe.create(image_chunk, n_jobs=N_JOBS)
+                f_features.flush()
 
 
 # %%

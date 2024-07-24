@@ -10,11 +10,13 @@ import numpy as np
 from tqdm import tqdm
 
 import sorep
-from sorep.features import *
+from sorep.features import cbm_centered, fermi_centered, vbm_cbm_concatenated, vbm_centered, vbm_fermi_cbm_concatenated
 
 # %%
+MAT_HDF = pl.Path("../data/mc3d/materials.h5")
+FEAT_HDF = pl.Path("../data/mc3d/features.h5")
 OVERWRITE_NEW = False
-OVERWRITE_ALL = False
+OVERWRITE_ALL = True
 SMEARING_TYPE = "gauss"
 SMEARING_WIDTH = 0.05  # eV
 FEATURE_DTYPE = "float32"
@@ -128,20 +130,12 @@ def _flatten(dictionary, parent_key="", separator="__"):
     return dict(items)
 
 
-def load_dirs(dirs: list[os.PathLike]):
-    """Material loader generator.
-
-    Args:
-        dirs (list[os.PathLike]): Material directories.
-
-    Yields:
-        sorep.MaterialData: Material data object.
-    """
-    for dir_ in dirs:
-        yield sorep.MaterialData.from_dir(dir_)
+def load_materials(hdf, ids, calc_type):
+    for id_ in ids:
+        yield sorep.MaterialData.from_hdf(hdf[id_][calc_type])
 
 
-def featurize_dirs(dirs: list[os.PathLike], featurization: dict) -> dict:
+def featurize(hdf, calc_type: str, featurization: dict) -> dict:
     """Apply the featurization described in `featurization` to all materials in `dirs`.
 
     Args:
@@ -152,13 +146,13 @@ def featurize_dirs(dirs: list[os.PathLike], featurization: dict) -> dict:
         dict: Dictionary containing material ids and features.
     """
     result = {}
-    # HDF5 doesn't like numpy 'U' strings, so use Python strings
-    result["material_id"] = [dir_.parent.name for dir_ in dirs]
+    ids = [id_ for id_ in hdf.keys() if f"{id_}/{calc_type}" in hdf]
+    result["id"] = ids
     # This is a generator so we don't need to load all the materials at once
-    materials = load_dirs(dirs)
+    materials = load_materials(hdf, ids, calc_type)
     # pmap requires that the function is pickleable and has one argument; partial gets us both
     _featurize = partial(featurization["function"], **featurization["params"])
-    pbar = tqdm(materials, desc="Compute SOREP features", ncols=80, total=len(dirs))
+    pbar = tqdm(materials, desc="Compute SOREP features", ncols=80, total=len(ids))
     with Pool(processes=12, maxtasksperchild=1) as p:
         result["features"] = np.array(p.map(_featurize, pbar))
     return result
@@ -173,23 +167,26 @@ def _equal_params_existing(group, params):
 
 
 def main():
-    for calculation_type in ["single_shot", "scf"]:
-        dirs = list(pl.Path("../data/mc3d/").glob(f"*/{calculation_type}"))
-        print(f"Processing {calculation_type} calculations")
-        for featurization in FEATURIZATIONS:
-            feature_method = featurization["function"].__name__
-            attrs = _flatten(featurization["params"])
-            mode = "w" if OVERWRITE_ALL else "a"
-            with h5py.File(f"../data/mc3d_features_{calculation_type}.h5", mode) as f:
-                method_group = f[feature_method] if feature_method in f else f.create_group(feature_method)
+    mode = "w" if OVERWRITE_ALL else "a"
+    with h5py.File(FEAT_HDF, mode) as f:
+        for calculation_type in ["single_shot", "scf"]:
+            print(f"Processing {calculation_type} calculations")
+            for featurization in FEATURIZATIONS:
+                feature_method = featurization["function"].__name__
+                attrs = _flatten(featurization["params"])
+                key = f"{calculation_type}/{feature_method}"
+                method_group = f[key] if key in f else f.create_group(key)
                 if existing_key := _equal_params_existing(method_group, attrs):
                     if OVERWRITE_NEW:
                         del method_group[existing_key]
                     else:
-                        print(f"Skipping existing instance of {feature_method}")
+                        print(f"Skipping existing instance of {key}")
                         continue
+
                 print(f"Featurizing with {feature_method}")
-                features = featurize_dirs(dirs, featurization)
+                with h5py.File(MAT_HDF, "r") as materials_file:
+                    features = featurize(materials_file, calculation_type, featurization)
+
                 instance_key = str(max([int(key) for key in method_group.keys()], default=-1) + 1)
                 instance_group = method_group.create_group(instance_key)
                 for key, val in attrs.items():
@@ -208,7 +205,7 @@ def main():
                     shuffle=True,
                     dtype=FEATURE_DTYPE,
                 )
-                instance_group.create_dataset("material_id", data=features["material_id"], compression="gzip")
+                instance_group.create_dataset("id", data=features["id"], compression="gzip")
 
 
 # %%

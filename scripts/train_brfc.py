@@ -111,22 +111,26 @@ def evaluate_model(model, X_test, y_test, X_train, y_train):
 
 
 def load_data(data_dir: os.PathLike, database: str, calculation_type: str, feature_path: str):
-    with open(data_dir / f"{database}_targets.npz", "rb") as fp:
-        npz = np.load(fp)
-        target_df = pd.DataFrame(data=dict(npz))
-
-    with h5py.File(data_dir / f"{database}_features_{calculation_type}.h5", "r") as f:
-        feature_df = pd.DataFrame(
+    with h5py.File(data_dir / database / "targets.h5", "r") as f:
+        target_df = pd.DataFrame(
             data={
-                "material_id": f[feature_path]["material_id"][()].astype(str),
-                "features": f[feature_path]["features"][()].tolist(),
+                "id": f["id"][()].astype(str),
+                "meets_tcm_criteria": f["meets_tcm_criteria"][()],
             }
         )
 
-    df = pd.merge(target_df, feature_df, on="material_id")
+    with h5py.File(data_dir / database / "features.h5", "r") as f:
+        feature_df = pd.DataFrame(
+            data={
+                "id": f[f"{calculation_type}/{feature_path}"]["id"][()].astype(str),
+                "features": f[f"{calculation_type}/{feature_path}"]["features"][()].tolist(),
+            }
+        )
+
+    df = pd.merge(target_df, feature_df, on="id")
     X = np.array(df["features"].tolist())
     y = df["meets_tcm_criteria"].to_numpy()
-    id_ = df["material_id"].to_numpy()
+    id_ = df["id"].to_numpy()
 
     # Create constant hold-out validation set of 10% of the data
     X, X_val, y, y_val, id_, id_val = skms.train_test_split(X, y, id_, test_size=0.1, random_state=9997)
@@ -192,15 +196,13 @@ DATABASE = "mc3d"
 CALCULATION_TYPE = "single_shot"
 PARALLEL = True
 FEATURE_PATHS = [
-    "vbm_centered/0",  # -2:513:+6
     "fermi_centered/0",  # -5:513:+5
+    "vbm_centered/0",  # -2:513:+6
     "cbm_centered/0",  # -6:513:+2
     "vbm_cbm_concatenated/0",  # -2:257:+3σ, -3σ:257:+2
     "vbm_cbm_concatenated/1",  # -2:257:+2, -2:257:+2
     "vbm_fermi_cbm_concatenated/0",  # -1:171:+1, -1:171:+1, -1:171:+1
-    "soap/0",  # No species (~105 features, n=6, l=4, r=6)
-    # "soap/1",  # With species (~3.6M features) #! Code needs refactoring to handle this
-    "soap/2",  # No species (~550 features, n=10, l=9, r=6)
+    "soap/0",  # No species (~550 features, n=10, l=9, r=6)
 ]
 TRAIN_SIZES = [
     0.001,
@@ -254,13 +256,14 @@ def main():
             results.append(_train_evaluate(feature_path))
 
     print("Saving results")
-    with h5py.File(pl.Path(DATA_DIR) / f"{DATABASE}_metrics_{CALCULATION_TYPE}.h5", "a") as f:
-        for feature_path, feature_results in zip(FEATURE_PATHS, results):
+    with h5py.File(pl.Path(DATA_DIR) / DATABASE / "brfc_metrics.h5", "a") as f:
+        feature_paths = [f"{CALCULATION_TYPE}/{feature_path}" for feature_path in FEATURE_PATHS]
+        for feature_path, feature_results in zip(feature_paths, results):
             feature_results, creation_time = feature_results
             if feature_path in f:
                 del f[feature_path]
             g = f.create_group(feature_path)
-            g.attrs["creation_time"] = creation_time
+            g.attrs["ctime"] = creation_time
             for key, val in feature_results.items():
                 g.create_dataset(key, data=val)
 

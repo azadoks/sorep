@@ -18,8 +18,9 @@ load_profile("3dd_sorep")
 PwCalculation = plugins.CalculationFactory("quantumespresso.pw")
 PwBaseWorkChain = plugins.WorkflowFactory("quantumespresso.pw.base")
 PwBandsWorkChain = plugins.WorkflowFactory("quantumespresso.pw.bands")
-# TODO: not up-to-date on the HDF5 format (see to_hdf5.py)
 # %%
+HDF_ARRAY_KWARGS = {"compression": "gzip", "shuffle": True}
+
 STRUCTURE_KWARGS = {
     "cls": orm.StructureData,
     "tag": "structure",
@@ -212,20 +213,29 @@ def _get_metadata(res: dict) -> dict:
 def _get_bands_arrays(res: dict) -> dict:
     metadata = _get_metadata(res)["bands"]
     bands_arrays = {
-        "eigenvalues": res["bands"]["*"].get_array("bands"),
-        "kpoints": res["bands"]["*"].get_array("kpoints"),
-        "weights": res["bands"]["*"].get_array("weights"),
-        "cell": np.array(res["structure"]["*"].cell),
-        "labels": res["bands"].get("attributes.labels", []),
-        "label_numbers": np.array(res["bands"].get("attributes.label_numbers", []), dtype=int),
-        "n_electrons": metadata["number_of_electrons"],
+        "eigenvalues": {"data": res["bands"]["*"].get_array("bands"), "attrs": {"units": "eV"}, **HDF_ARRAY_KWARGS},
+        "kpoints": {
+            "data": res["bands"]["*"].get_array("kpoints"),
+            "attrs": {"units": "dimensionless"},
+            **HDF_ARRAY_KWARGS,
+        },
+        "weights": {"data": res["bands"]["*"].get_array("weights"), **HDF_ARRAY_KWARGS},
+        "cell": {"data": np.array(res["structure"]["*"].cell), "attrs": {"units": "angstrom"}, **HDF_ARRAY_KWARGS},
+        "labels": {
+            "data": res["bands"].get("attributes.labels", []),
+            "dtype": h5py.string_dtype(encoding="utf-8", length=None),
+        },
+        "label_numbers": {"data": np.array(res["bands"].get("attributes.label_numbers", []), dtype=int)},
+        "n_electrons": {"data": metadata["number_of_electrons"]},
         # Completely ignore QE Fermi energy and occupations -- often garbage or missing (<=v6.8 w/ cold or single_shot)
         # "fermi_energy": metadata["qe_fermi_energy"],
         # "occupations": res["bands"]["*"].get_array("occupations"),
     }
     # Add a spin dimension if missing
-    bands_arrays["bands"] = (
-        bands_arrays["bands"] if bands_arrays["bands"].ndim == 3 else np.expand_dims(bands_arrays["bands"], 0)
+    bands_arrays["eigenvalues"]["data"] = (
+        bands_arrays["eigenvalues"]["data"]
+        if bands_arrays["eigenvalues"]["data"].ndim == 3
+        else np.expand_dims(bands_arrays["eigenvalues"]["data"], 0)
     )
 
     bandstructure = sorep.BandStructure(**bands_arrays)
@@ -235,8 +245,8 @@ def _get_bands_arrays(res: dict) -> dict:
     if bandstructure.is_insulating():
         fermi_energy = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
     occupations = bandstructure.compute_occupations(metadata["smearing"], metadata["degauss"], fermi_energy)
-    bands_arrays["fermi_energy"] = fermi_energy
-    bands_arrays["occupations"] = occupations
+    bands_arrays["fermi_energy"] = {"data": fermi_energy, "attrs": {"units": "eV"}}
+    bands_arrays["occupations"] = {"data": occupations}
 
     return bands_arrays
 
@@ -244,7 +254,13 @@ def _get_bands_arrays(res: dict) -> dict:
 def _get_atoms_arrays(res: dict) -> dict:
     structure = res["structure"]["*"]
     atoms = structure.get_ase()
-    return {**atoms.arrays, "cell": atoms.cell.array, "pbc": atoms.pbc}
+    return {
+        "positions": {"data": atoms.arrays["positions"], "attrs": {"units": "angstrom"}, **HDF_ARRAY_KWARGS},
+        "numbers": {"data": atoms.arrays["numbers"], **HDF_ARRAY_KWARGS},
+        "masses": {"data": atoms.arrays["masses"], "attrs": {"units": "amu"}, **HDF_ARRAY_KWARGS},
+        "cell": {"data": np.array(atoms.cell), "attrs": {"units": "angstrom"}, **HDF_ARRAY_KWARGS},
+        "pbc": {"data": atoms.pbc},
+    }
 
 
 def _hdf_result(hdf_group, res: dict) -> None:
@@ -257,19 +273,17 @@ def _hdf_result(hdf_group, res: dict) -> None:
     for key, value in metadata["bands"].items():
         bands_group.attrs[key] = value
     for key, value in _get_bands_arrays(res).items():
-        if isinstance(value, (np.ndarray, list)):
-            bands_group.create_dataset(key, data=value, compression="gzip", shuffle=True)
-        else:
-            bands_group.create_dataset(key, data=value)
+        attrs = value.pop("attrs", {})
+        bands_group.create_dataset(key, **value)
+        value["attrs"] = attrs
 
     atoms_group = hdf_group.create_group("atoms")
     for key, value in metadata["structure"].items():
         atoms_group.attrs[key] = value
     for key, value in _get_atoms_arrays(res).items():
-        if isinstance(value, (np.ndarray, list)):
-            atoms_group.create_dataset(key, data=value, compression="gzip", shuffle=True)
-        else:
-            atoms_group.create_dataset(key, data=value)
+        attrs = value.pop("attrs", {})
+        bands_group.create_dataset(key, **value)
+        value["attrs"] = attrs
 
 
 def _single_shot_query() -> list[dict]:
@@ -334,8 +348,8 @@ def _deduplicate(qr: list[dict]) -> list[dict]:
 
 
 # %%
-def main(dry_run: bool = False):
-    f = h5py.File(DATA_DIR / "data_hdf.h5", "w")
+def main():
+    f = h5py.File(DATA_DIR / "materials.h5", "w")
 
     name = "SINGLE-SHOT"
     print(f"[{name:9s}] Querying for calculations...")
@@ -377,6 +391,11 @@ def main(dry_run: bool = False):
         id_, *_ = _get_id(res)
         g = f.create_group(f"{id_}/bands")
         _hdf_result(g, res)
+
+    # Remove materials which miss any of the three calculations
+    for id_, material in f.items():
+        if "single_shot" not in material or "scf" not in material or "bands" not in material:
+            del f[id_]
 
     return single_shot_qr, scf_qr, bands_qr
 

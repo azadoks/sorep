@@ -6,53 +6,31 @@ import numpy as np
 import sorep
 
 # %%
-with h5py.File("../data/mc3d/data.h5", "r") as f:
-    material = sorep.MaterialData.from_hdf(f["mc3d-10"]["scf"])
+ef1 = []
+ef2 = []
+diff_metal = []
+with h5py.File("../data/mc3d/materials.h5", "r") as f:
+    for id_, mat_g in f.items():
+        material = sorep.MaterialData.from_hdf(mat_g["single_shot"])
+        ef_saved = material.bands.fermi_energy
+        is_met_saved = material.bands.is_metallic()
+        ef_found = material.bands.find_fermi_energy(
+            material.metadata["bands"]["smearing"], material.metadata["bands"]["degauss"]
+        )
+        material.bands.fermi_energy = ef_found
+        is_met_found = material.bands.is_metallic()
+        material.bands.fermi_energy = ef_saved
 
+        ef1.append(ef_saved)
+        ef2.append(ef_found)
+        diff_metal.append(is_met_saved != is_met_found)
 # %%
-bands = material.bands
-smearing_type = "cold" # material.metadata["smearing"]
-smearing_width = material.metadata["degauss"] / sorep.constants.RY_TO_EV
-# %%
-%%time
-res = (
-    sorep.occupation.compute_n_electrons(
-        bands.eigenvalues, bands.weights, bands.fermi_energy, smearing_type, smearing_width
-    ),
-    sorep.occupation.compute_n_electrons_derivative(
-        bands.eigenvalues, bands.weights, bands.fermi_energy, smearing_type, smearing_width
-    ),
-    sorep.occupation.compute_n_electrons_2nd_derivative(
-        bands.eigenvalues, bands.weights, bands.fermi_energy, smearing_type, smearing_width
-    ),
-)
-# %%
-%%time
-res_py = (
-    sorep.occupation.compute_n_electrons_python(
-        bands.eigenvalues, bands.weights, bands.fermi_energy, smearing_type, smearing_width
-    ),
-    sorep.occupation.compute_n_electrons_derivative_python(
-        bands.eigenvalues, bands.weights, bands.fermi_energy, smearing_type, smearing_width
-    ),
-    sorep.occupation.compute_n_electrons_2nd_derivative_python(
-        bands.eigenvalues, bands.weights, bands.fermi_energy, smearing_type, smearing_width
-    ),
-)
-# %%
-res, res_py
-# %%
-%%timeit
-sorep.fermi.find_fermi_energy_two_stage(
-    bands.eigenvalues, bands.weights, smearing_type, smearing_width, material.metadata["number_of_electrons"]
-)
-
-# %%
-# ef = material.bands.fermi_energy
-ef = sorep.fermi.find_fermi_energy_two_stage(
-    bands.eigenvalues, bands.weights, smearing_type, smearing_width, material.metadata["number_of_electrons"]
-)
-energies = np.linspace(ef - 5, ef + 5, 1024)
-dos = bands.compute_smeared_dos(energies, "gauss", 0.05)
-plt.plot(energies, dos.sum(axis=0))
+ef1 = np.array(ef1)
+ef2 = np.array(ef2)
+diff_metal = np.array(diff_metal)
+fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+ax[0].scatter(ef1[diff_metal], ef2[diff_metal])
+ax[0].scatter(ef1[~diff_metal], ef2[~diff_metal], alpha=0.01)
+ax[1].hist(ef1 - ef2, bins=100)
+ax[1].set_yscale("log")
 # %%

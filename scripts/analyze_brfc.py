@@ -12,35 +12,38 @@ import seaborn as sns
 import sklearn.metrics as skm
 
 # %%
+DATA_DIR = pl.Path("../data")
 DATABASE = "mc3d"
 CALCULATION_TYPE = "single_shot"
 # %%
-TARGET_DF = pd.DataFrame({k: v.tolist() for (k, v) in np.load(f"../data/{DATABASE}_targets.npz").items()})
+with h5py.File(DATA_DIR / DATABASE / "targets.h5", "r") as f:
+    TARGET_DF = pd.DataFrame({k: v[()] for (k, v) in f.items()})
 
 METRICS_DFS = {}
-with h5py.File(f"../data/{DATABASE}_metrics_{CALCULATION_TYPE}.h5", "r") as f:
-    for feature_name, feature_group in f.items():
+with h5py.File(DATA_DIR / DATABASE / "brfc_metrics.h5", "r") as f:
+    g = f[CALCULATION_TYPE]
+    for feature_name, feature_group in g.items():
         for feature_id, group in feature_group.items():
             METRICS_DFS[f"{feature_name}/{feature_id}"] = pd.DataFrame({k: v[()].tolist() for (k, v) in group.items()})
 
-IMPORTANCES = {}
-with h5py.File(f"../data/{DATABASE}_permutation_importance_{CALCULATION_TYPE}.h5", "r") as f:
-    for feature_name, feature_group in f.items():
-        for feature_instance, instance_group in feature_group.items():
-            IMPORTANCES[f"{feature_name}/{feature_instance}"] = {"values": [], "mean": [], "std": []}
-            for random_state, random_state_group in instance_group.items():
-                IMPORTANCES[f"{feature_name}/{feature_instance}"]["values"].append(
-                    random_state_group["importances"][()].tolist()
-                )
-                IMPORTANCES[f"{feature_name}/{feature_instance}"]["mean"].append(
-                    random_state_group["importances_mean"][()].tolist()
-                )
-                IMPORTANCES[f"{feature_name}/{feature_instance}"]["std"].append(
-                    random_state_group["importances_std"][()].tolist()
-                )
+# IMPORTANCES = {}
+# with h5py.File(f"../data/{DATABASE}_permutation_importance_{CALCULATION_TYPE}.h5", "r") as f:
+#     for feature_name, feature_group in f.items():
+#         for feature_instance, instance_group in feature_group.items():
+#             IMPORTANCES[f"{feature_name}/{feature_instance}"] = {"values": [], "mean": [], "std": []}
+#             for random_state, random_state_group in instance_group.items():
+#                 IMPORTANCES[f"{feature_name}/{feature_instance}"]["values"].append(
+#                     random_state_group["importances"][()].tolist()
+#                 )
+#                 IMPORTANCES[f"{feature_name}/{feature_instance}"]["mean"].append(
+#                     random_state_group["importances_mean"][()].tolist()
+#                 )
+#                 IMPORTANCES[f"{feature_name}/{feature_instance}"]["std"].append(
+#                     random_state_group["importances_std"][()].tolist()
+#                 )
 
-    for key, value in IMPORTANCES.items():
-        IMPORTANCES[key]["values"] = np.concatenate(value["values"], axis=1).T
+#     for key, value in IMPORTANCES.items():
+#         IMPORTANCES[key]["values"] = np.concatenate(value["values"], axis=1).T
 # %%
 FEATURE_KWARGS = {
     "vbm_centered/0": {
@@ -127,17 +130,7 @@ FEATURE_KWARGS = {
             {"x": +2.0, "label": r"$E_{CBM}$", "c": "#000080", "ls": "-.", "alpha": 0.5},
         ],
     },
-    # "soap/0": {
-    #     "title": r"SOAP",
-    #     "line_kwargs": {"c": "grey"},
-    #     "fill_kwargs": {"color": "grey", "alpha": 0.3},
-    #     "errorbar_kwargs": {"c": "grey", "capsize": 3, "marker": "."},
-    #     "line_x": np.arange(105),
-    #     # "xticks": [-3, -2 -1, 0, 1, 2, 3],
-    #     # "xtick_labels": [-1, r"$E_{\mathrm{VBM}}$", r"$\pm$1", r"$E_{F}$", r"$\pm$1", r"$E_{\mathrm{CBM}}$", 1],
-    #     # "vlines": [],
-    # },
-    "soap/2": {
+    "soap/0": {
         "title": r"SOAP ($n_{\mathrm{max}}=10,l_{\mathrm{max}}=9$)",
         "shortname": "SOAP",
         "line_kwargs": {"c": "grey"},
@@ -270,6 +263,7 @@ def plot_balanced_accuracy(target_df, metrics, avg="mean", error="std"):
 
 fig = plot_balanced_accuracy(TARGET_DF, METRICS_DFS)
 fig.savefig("../plots/mc3d_tcm_balanced_accuracy.pdf")
+fig
 
 
 # %%
