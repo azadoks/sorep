@@ -19,6 +19,7 @@ OVERWRITE_NEW = False
 OVERWRITE_ALL = True
 SMEARING_TYPE = "gauss"
 SMEARING_WIDTH = 0.05  # eV
+MAX_EXPONENT = 8.0  # Maximum Z-score / argument to exp in smearing functions
 FEATURE_DTYPE = "float32"
 
 FEATURIZATIONS = [
@@ -30,6 +31,7 @@ FEATURIZATIONS = [
             "n_energies": 513,
             "smearing_type": SMEARING_TYPE,
             "smearing_width": SMEARING_WIDTH,
+            "max_exponent": MAX_EXPONENT,
         },
     },
     {
@@ -40,6 +42,7 @@ FEATURIZATIONS = [
             "n_energies": 513,
             "smearing_type": SMEARING_TYPE,
             "smearing_width": SMEARING_WIDTH,
+            "max_exponent": MAX_EXPONENT,
         },
     },
     {
@@ -50,6 +53,7 @@ FEATURIZATIONS = [
             "n_energies": 513,
             "smearing_type": SMEARING_TYPE,
             "smearing_width": SMEARING_WIDTH,
+            "max_exponent": MAX_EXPONENT,
         },
     },
     {
@@ -61,6 +65,7 @@ FEATURIZATIONS = [
                 "n_energies": 257,
                 "smearing_type": SMEARING_TYPE,
                 "smearing_width": SMEARING_WIDTH,
+                "max_exponent": MAX_EXPONENT,
             },
             "cbm_params": {
                 "e_min": -3 * SMEARING_WIDTH,
@@ -68,6 +73,7 @@ FEATURIZATIONS = [
                 "n_energies": 257,
                 "smearing_type": SMEARING_TYPE,
                 "smearing_width": SMEARING_WIDTH,
+                "max_exponent": MAX_EXPONENT,
             },
         },
     },
@@ -80,6 +86,7 @@ FEATURIZATIONS = [
                 "n_energies": 257,
                 "smearing_type": SMEARING_TYPE,
                 "smearing_width": SMEARING_WIDTH,
+                "max_exponent": MAX_EXPONENT,
             },
             "cbm_params": {
                 "e_min": -2,
@@ -87,6 +94,7 @@ FEATURIZATIONS = [
                 "n_energies": 257,
                 "smearing_type": SMEARING_TYPE,
                 "smearing_width": SMEARING_WIDTH,
+                "max_exponent": MAX_EXPONENT,
             },
         },
     },
@@ -99,6 +107,7 @@ FEATURIZATIONS = [
                 "n_energies": 171,
                 "smearing_type": SMEARING_TYPE,
                 "smearing_width": SMEARING_WIDTH,
+                "max_exponent": MAX_EXPONENT,
             },
             "fermi_params": {
                 "e_min": -1,
@@ -106,6 +115,7 @@ FEATURIZATIONS = [
                 "n_energies": 171,
                 "smearing_type": SMEARING_TYPE,
                 "smearing_width": SMEARING_WIDTH,
+                "max_exponent": MAX_EXPONENT,
             },
             "cbm_params": {
                 "e_min": -1,
@@ -113,6 +123,7 @@ FEATURIZATIONS = [
                 "n_energies": 171,
                 "smearing_type": SMEARING_TYPE,
                 "smearing_width": SMEARING_WIDTH,
+                "max_exponent": MAX_EXPONENT,
             },
         },
     },
@@ -169,43 +180,47 @@ def _equal_params_existing(group, params):
 def main():
     mode = "w" if OVERWRITE_ALL else "a"
     with h5py.File(FEAT_HDF, mode) as f:
-        for calculation_type in ["single_shot", "scf"]:
-            print(f"Processing {calculation_type} calculations")
-            for featurization in FEATURIZATIONS:
-                feature_method = featurization["function"].__name__
-                attrs = _flatten(featurization["params"])
-                key = f"{calculation_type}/{feature_method}"
-                method_group = f[key] if key in f else f.create_group(key)
-                if existing_key := _equal_params_existing(method_group, attrs):
-                    if OVERWRITE_NEW:
-                        del method_group[existing_key]
-                    else:
-                        print(f"Skipping existing instance of {key}")
-                        continue
+        for train_test in ("test", "train"):
+            train_test_group = f[train_test] if train_test in f else f.create_group(train_test)
+            for calculation_type in ["single_shot", "scf"]:
+                print(f"Processing {train_test}-{calculation_type} calculations")
+                for featurization in FEATURIZATIONS:
+                    feature_method = featurization["function"].__name__
+                    attrs = _flatten(featurization["params"])
+                    key = f"{calculation_type}/{feature_method}"
+                    method_group = (
+                        train_test_group[key] if key in train_test_group else train_test_group.create_group(key)
+                    )
+                    if existing_key := _equal_params_existing(method_group, attrs):
+                        if OVERWRITE_NEW:
+                            del method_group[existing_key]
+                        else:
+                            print(f"Skipping existing instance of {key}")
+                            continue
 
-                print(f"Featurizing with {feature_method}")
-                with h5py.File(MAT_HDF, "r") as materials_file:
-                    features = featurize(materials_file, calculation_type, featurization)
+                    print(f"Featurizing with {feature_method}")
+                    with h5py.File(MAT_HDF, "r") as materials_file:
+                        features = featurize(materials_file[train_test], calculation_type, featurization)
 
-                instance_key = str(max([int(key) for key in method_group.keys()], default=-1) + 1)
-                instance_group = method_group.create_group(instance_key)
-                for key, val in attrs.items():
-                    instance_group.attrs[key] = val
+                    instance_key = str(max([int(key) for key in method_group.keys()], default=-1) + 1)
+                    instance_group = method_group.create_group(instance_key)
+                    for key, val in attrs.items():
+                        instance_group.attrs[key] = val
 
-                # Chunking is important for efficient access
-                # We aim for chunks that are roughly 512 KB in size, completely capturing at least one feature
-                # vector.
-                chunk_rows = max(512_000 // features["features"][0].nbytes, 1)
-                chunk_cols = features["features"].shape[1]
-                instance_group.create_dataset(
-                    "features",
-                    data=features["features"],
-                    compression="gzip",
-                    chunks=(chunk_rows, chunk_cols),
-                    shuffle=True,
-                    dtype=FEATURE_DTYPE,
-                )
-                instance_group.create_dataset("id", data=features["id"], compression="gzip")
+                    # Chunking is important for efficient access
+                    # We aim for chunks that are roughly 512 KB in size, completely capturing at least one feature
+                    # vector.
+                    chunk_rows = max(512_000 // features["features"][0].nbytes, 1)
+                    chunk_cols = features["features"].shape[1]
+                    instance_group.create_dataset(
+                        "features",
+                        data=features["features"],
+                        compression="gzip",
+                        chunks=(chunk_rows, chunk_cols),
+                        shuffle=True,
+                        dtype=FEATURE_DTYPE,
+                    )
+                    instance_group.create_dataset("id", data=features["id"], compression="gzip")
 
 
 # %%

@@ -52,6 +52,7 @@ class MaterialData:
             cell=hdf["atoms/cell"][()],
             pbc=hdf["atoms/pbc"][()],
         )
+        atoms.info = dict(hdf["atoms"].attrs)
         return cls(
             atoms=atoms,
             bands=BandStructure.from_hdf(hdf["bands"]),

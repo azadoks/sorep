@@ -8,7 +8,7 @@ from aiida import load_profile, orm, plugins
 import h5py
 import numpy as np
 import pandas as pd
-from qe_tools import CONSTANTS
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 import sorep
@@ -35,7 +35,9 @@ STRUCTURE_KWARGS = {
         "extras.formula_hill",
         "extras.spacegroup_international",
         "extras.matproj_duplicate",
+        "extras.mc3d_id",
     ],
+    "filters": {"extras": {"has_key": "mc3d_id"}},
 }
 
 BANDS_KWARGS = {
@@ -82,7 +84,7 @@ INPUT_KWARGS = {
     "project": ["attributes.SYSTEM.occupations", "attributes.SYSTEM.smearing", "attributes.SYSTEM.degauss"],
 }
 
-with open("../data/mc3d/source_to_mc3d_id.json", "r", encoding="utf-8") as fp:
+with open("../data/mc3d/util/source_to_mc3d_id.json", "r", encoding="utf-8") as fp:
     SOURCE_TO_MC3D = json.load(fp)
 
 DATA_DIR = pl.Path("../data/mc3d/")
@@ -203,7 +205,7 @@ def _get_metadata(res: dict) -> dict:
             "degauss": (
                 0.0
                 if res["input"]["attributes.SYSTEM.degauss"] is None
-                else res["input"]["attributes.SYSTEM.degauss"] * CONSTANTS.ry_to_ev
+                else res["input"]["attributes.SYSTEM.degauss"] * sorep.constants.RY_TO_EV
             ),
             "degauss_units": "eV",
         },
@@ -238,15 +240,42 @@ def _get_bands_arrays(res: dict) -> dict:
         else np.expand_dims(bands_arrays["eigenvalues"]["data"], 0)
     )
 
-    bandstructure = sorep.BandStructure(**bands_arrays)
-    fermi_energy = bandstructure.find_fermi_energy(metadata["smearing"], metadata["degauss"], n_electrons_tol=1e-4)
+    # Construct BandStructure object
+    bandstructure = sorep.BandStructure(**{key: value["data"] for (key, value) in bands_arrays.items()})
+    smearing_type = metadata["smearing"]
+    smearing_width = metadata["degauss"]
+
+    # Recompute Fermi energy
+    bandstructure.fermi_energy = bandstructure.find_fermi_energy(
+        smearing_type,
+        smearing_width,
+        n_electrons_tol=1e-6,
+        n_electrons_kwargs=N_ELECTRONS_KWARGS,
+        dn_electrons_kwargs=DN_ELECTRONS_KWARGS,
+        ddn_electrons_kwargs=DDN_ELECTRONS_KWARGS,
+        newton_kwargs=NEWTON_KWARGS,
+    )["fermi_energy"]
+
     # Move the Fermi energy to mid-gap if insulating
-    bandstructure.fermi_energy = fermi_energy
     if bandstructure.is_insulating():
-        fermi_energy = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
-    occupations = bandstructure.compute_occupations(metadata["smearing"], metadata["degauss"], fermi_energy)
-    bands_arrays["fermi_energy"] = {"data": fermi_energy, "attrs": {"units": "eV"}}
-    bands_arrays["occupations"] = {"data": occupations}
+        fermi_energy_mid_gap = bandstructure.vbm + (bandstructure.cbm - bandstructure.vbm) / 2
+        n_electrons_mid_gap = bandstructure.compute_n_electrons("delta", 0.0, fermi_energy_mid_gap)
+        if np.abs(n_electrons_mid_gap - bandstructure.n_electrons) < 1e-6:
+            bandstructure.fermi_energy = fermi_energy_mid_gap
+            smearing_type = "delta"
+            smearing_width = 0.0
+
+    # Check that the number of electrons from the Fermi level is within tolerance
+    n_electrons = bandstructure.compute_n_electrons(smearing_type, smearing_width)
+    if np.abs(n_electrons - bandstructure.n_electrons) > 1e-6:
+        raise ValueError(f"Number of electrons mismatch: {n_electrons} != {bandstructure.n_electrons}")
+
+    # Recompute occupations
+    bandstructure.occupations = bandstructure.compute_occupations(smearing_type, smearing_width)
+
+    # Save new Fermi energy and occupations in the bands arrays
+    bands_arrays["fermi_energy"] = {"data": bandstructure.fermi_energy, "attrs": {"units": "eV"}}
+    bands_arrays["occupations"] = {"data": bandstructure.occupations}
 
     return bands_arrays
 
@@ -263,8 +292,16 @@ def _get_atoms_arrays(res: dict) -> dict:
     }
 
 
-def _hdf_result(hdf_group, res: dict) -> None:
-    metadata = _get_metadata(res)
+def _get_arrays(res: dict) -> dict:
+    return {
+        "metadata": _get_metadata(res),
+        "bands": _get_bands_arrays(res),
+        "atoms": _get_atoms_arrays(res),
+    }
+
+
+def _hdf_result(hdf_group, arrays: dict) -> None:
+    metadata = arrays["metadata"]
 
     for key, value in metadata["calculation"].items():
         hdf_group.attrs[key] = value
@@ -272,23 +309,31 @@ def _hdf_result(hdf_group, res: dict) -> None:
     bands_group = hdf_group.create_group("bands")
     for key, value in metadata["bands"].items():
         bands_group.attrs[key] = value
-    for key, value in _get_bands_arrays(res).items():
+    for key, value in arrays["bands"].items():
         attrs = value.pop("attrs", {})
         bands_group.create_dataset(key, **value)
         value["attrs"] = attrs
+        for k, v in value["attrs"].items():
+            bands_group[key].attrs[k] = v
 
     atoms_group = hdf_group.create_group("atoms")
     for key, value in metadata["structure"].items():
         atoms_group.attrs[key] = value
-    for key, value in _get_atoms_arrays(res).items():
+    for key, value in arrays["atoms"].items():
         attrs = value.pop("attrs", {})
-        bands_group.create_dataset(key, **value)
+        atoms_group.create_dataset(key, **value)
         value["attrs"] = attrs
+        for k, v in value["attrs"].items():
+            atoms_group[key].attrs[k] = v
 
 
 def _single_shot_query() -> list[dict]:
     qb = orm.QueryBuilder()
-    qb.append(PwCalculation, tag="calculation", project=["uuid", "ctime"])
+    qb.append(
+        PwCalculation,
+        tag="calculation",
+        project=["uuid", "ctime", "attributes.version.core", "attributes.version.plugin"],
+    )
     qb.append(**STRUCTURE_KWARGS)
     qb.append(**BANDS_KWARGS)
     qb.append(**{**INPUT_KWARGS, "filters": {"attributes.ELECTRONS.electron_maxstep": 0}})
@@ -296,14 +341,14 @@ def _single_shot_query() -> list[dict]:
     return qb.dict()
 
 
-def _scf_query(single_shot_qr: list[dict]) -> list[dict]:
-    single_shot_source_ids = [r["structure"]["extras.source.id"] for r in single_shot_qr]
+def _scf_query() -> list[dict]:
     qb = orm.QueryBuilder()
-    qb.append(PwBaseWorkChain, tag="calculation", project=["uuid", "ctime"])
     qb.append(
-        **STRUCTURE_KWARGS,
-        filters={"extras.source.id": {"in": [id_ for id_ in single_shot_source_ids if id_ is not None]}},
+        PwBaseWorkChain,
+        tag="calculation",
+        project=["uuid", "ctime", "attributes.version.core", "attributes.version.plugin"],
     )
+    qb.append(**STRUCTURE_KWARGS)
     qb.append(**BANDS_KWARGS)
     qb.append(
         **{
@@ -316,14 +361,14 @@ def _scf_query(single_shot_qr: list[dict]) -> list[dict]:
     return qb.dict()
 
 
-def _bands_query(single_shot_qr: list[dict]) -> list[dict]:
-    single_shot_source_ids = [r["structure"]["extras.source.id"] for r in single_shot_qr]
+def _bands_query() -> list[dict]:
     qb = orm.QueryBuilder()
-    qb.append(PwBandsWorkChain, tag="calculation", project=["uuid", "ctime"])
     qb.append(
-        **STRUCTURE_KWARGS,
-        filters={"extras.source.id": {"in": [id_ for id_ in single_shot_source_ids if id_ is not None]}},
+        PwBandsWorkChain,
+        tag="calculation",
+        project=["uuid", "ctime", "attributes.version.core", "attributes.version.plugin"],
     )
+    qb.append(**STRUCTURE_KWARGS)
     qb.append(**{**BANDS_KWARGS, "project": ["*", "uuid", "attributes.labels", "attributes.label_numbers"]})
     qb.append(**{**INPUT_KWARGS, "edge_filters": {"label": "bands__pw__parameters"}})
     qb.append(
@@ -338,68 +383,94 @@ def _bands_query(single_shot_qr: list[dict]) -> list[dict]:
 
 def _deduplicate(qr: list[dict]) -> list[dict]:
     metadata_df = pd.DataFrame([_flatten(_get_metadata(r)) for r in qr])
-    metadata_df["calculation__ctime"] = metadata_df["calculation__ctime"].apply(datetime.fromisoformat)
-    metadata_df = metadata_df.sort_values(by="calculation__ctime")  # oldest first
-    metadata_df = metadata_df.drop_duplicates(subset="structure__id", keep="last")  # get the newest
     metadata_df = metadata_df[
         metadata_df.structure__id.apply(lambda x: x.startswith("mc3d"))
     ]  # keep only MC3D structures
+    metadata_df["calculation__ctime"] = metadata_df["calculation__ctime"].apply(datetime.fromisoformat)
+    metadata_df = metadata_df.sort_values(by="calculation__ctime")  # oldest first
+    metadata_df = metadata_df.drop_duplicates(subset="structure__id", keep="last")  # get the newest
     return [qr[i] for i in metadata_df.index]
 
 
 # %%
-def main():
-    f = h5py.File(DATA_DIR / "materials.h5", "w")
+N_ELECTRONS_KWARGS = {"max_exponent": np.inf}
+DN_ELECTRONS_KWARGS = {"max_exponent": np.inf}
+DDN_ELECTRONS_KWARGS = {"max_exponent": np.inf}
+NEWTON_KWARGS = {"maxiter": 500}
 
+
+def main():
     name = "SINGLE-SHOT"
-    print(f"[{name:9s}] Querying for calculations...")
+    print(f"[{name:>12s}] Querying for calculations...")
     single_shot_qr = _single_shot_query()
-    print(f"[{name:9s}] Found {len(single_shot_qr)}")
-    print(f"[{name:9s}] De-duplicating...")
+    print(f"[{name:>12s}] Found {len(single_shot_qr)}")
+    print(f"[{name:>12s}] De-duplicating...")
     single_shot_qr = _deduplicate(single_shot_qr)
-    print(f"[{name:9s}] Unique {len(single_shot_qr)}")
-    for res in tqdm(single_shot_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
-        id_, *_ = _get_id(res)
-        try:
-            g = f.create_group(f"{id_}/single_shot")
-            _hdf_result(g, res)
-        except ValueError as e:
-            raise ValueError(f"Error for {id_}: {id_}/single_shot") from e
+    print(f"[{name:>12s}] Unique {len(single_shot_qr)}")
     print()
 
     name = "SCF"
-    print(f"[{name:9s}] Querying for calculations...")
-    scf_qr = _scf_query(single_shot_qr)
-    print(f"[{name:9s}] Found {len(scf_qr)}")
-    print(f"[{name:9s}] De-duplicating...")
+    print(f"[{name:>12s}] Querying for calculations...")
+    scf_qr = _scf_query()
+    print(f"[{name:>12s}] Found {len(scf_qr)}")
+    print(f"[{name:>12s}] De-duplicating...")
     scf_qr = _deduplicate(scf_qr)
-    print(f"[{name:9s}] Unique {len(scf_qr)}")
-    for res in tqdm(scf_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
-        id_, *_ = _get_id(res)
-        g = f.create_group(f"{id_}/scf")
-        _hdf_result(g, res)
+    print(f"[{name:>12s}] Unique {len(scf_qr)}")
     print()
 
     name = "BANDS"
-    print(f"[{name:9s}] Querying for calculations...")
-    bands_qr = _bands_query(single_shot_qr)
-    print(f"[{name:9s}] Found {len(bands_qr)}")
-    print(f"[{name:9s}] De-duplicating...")
+    print(f"[{name:>12s}] Querying for calculations...")
+    bands_qr = _bands_query()
+    print(f"[{name:>12s}] Found {len(bands_qr)}")
+    print(f"[{name:>12s}] De-duplicating...")
     bands_qr = _deduplicate(bands_qr)
-    print(f"[{name:9s}] Unique {len(bands_qr)}")
-    for res in tqdm(bands_qr, desc=f"[{name:9s}] Dumping...", ncols=80):
-        id_, *_ = _get_id(res)
-        g = f.create_group(f"{id_}/bands")
-        _hdf_result(g, res)
+    print(f"[{name:>12s}] Unique {len(bands_qr)}")
+    print()
 
-    # Remove materials which miss any of the three calculations
-    for id_, material in f.items():
-        if "single_shot" not in material or "scf" not in material or "bands" not in material:
-            del f[id_]
+    combined_qr = {}
+    for res in single_shot_qr:
+        mc3d_id = res["structure"]["extras.mc3d_id"]
+        if mc3d_id in combined_qr:
+            combined_qr[mc3d_id]["single_shot"] = res
+        else:
+            combined_qr[mc3d_id] = {"single_shot": res}
+    for res in scf_qr:
+        mc3d_id = res["structure"]["extras.mc3d_id"]
+        if mc3d_id in combined_qr:
+            combined_qr[mc3d_id]["scf"] = res
+    for res in bands_qr:
+        mc3d_id = res["structure"]["extras.mc3d_id"]
+        if mc3d_id in combined_qr:
+            combined_qr[mc3d_id]["bands"] = res
 
-    return single_shot_qr, scf_qr, bands_qr
+    combined_qr = {mc3d_id: combined_res for (mc3d_id, combined_res) in combined_qr.items() if len(combined_res) == 3}
+    combined_qr = [item[1] for item in sorted(combined_qr.items())]
+    print(f"[{'COMBINED':>12s}] Found {len(combined_qr)}")
+
+    combined_arrays = []
+    for res in tqdm(combined_qr, desc="[COMBINED] Getting arrays...", ncols=80):
+        try:
+            combined_arrays.append({k: _get_arrays(v) for (k, v) in res.items()})
+        except Exception as exc:
+            print(f"Failed to get arrays for {res['single_shot']['structure']['extras.mc3d_id']}: {exc}")
+
+    train_arrays, test_arrays = train_test_split(combined_arrays, test_size=0.1, random_state=9997)
+    print(f"[{'TRAIN-TEST':>12s}] {len(train_arrays)} - {len(test_arrays)}")
+
+    f = h5py.File(DATA_DIR / "materials_train_test.h5", "w")
+    for train_test, material_set in zip(["train", "test"], [train_arrays, test_arrays]):
+        train_test_group = f.create_group(train_test)
+        for material_arrays in tqdm(material_set, desc=f"[{train_test:>12s}] Dumping...", ncols=80):
+            mc3d_id = material_arrays["single_shot"]["metadata"]["structure"]["id"]
+            for calc_type, calc_type_arrays in material_arrays.items():
+                g = train_test_group.create_group(f"{mc3d_id}/{calc_type}")
+                _hdf_result(g, calc_type_arrays)
+
+    return None
 
 
 # %%
 if __name__ == "__main__":
     main()
+
+# %%

@@ -8,6 +8,7 @@ Compute the bands screening quantities for TCMs:
 # %%
 from multiprocessing import Pool
 import pathlib as pl
+import warnings
 
 import h5py
 import numpy as np
@@ -26,11 +27,23 @@ EFF_MASS_HDF = pl.Path("../data/mc3d/effective_masses.h5")
 
 def _compute_criteria(id_: str) -> dict:
     with h5py.File(MAT_HDF, "r") as f:
-        material = sorep.MaterialData.from_hdf(f[id_]["bands"])
-    if material.bands.is_metallic():
+        if id_ in f["test"]:
+            material_bands = sorep.MaterialData.from_hdf(f["test"][id_]["bands"])
+            material_scf = sorep.MaterialData.from_hdf(f["test"][id_]["scf"])
+            material_single_shot = sorep.MaterialData.from_hdf(f["test"][id_]["single_shot"])
+        else:
+            material_bands = sorep.MaterialData.from_hdf(f["train"][id_]["bands"])
+            material_scf = sorep.MaterialData.from_hdf(f["train"][id_]["scf"])
+            material_single_shot = sorep.MaterialData.from_hdf(f["train"][id_]["single_shot"])
+
+    scf_is_metallic = material_scf.bands.is_metallic()
+    bands_is_metallic = material_bands.bands.is_metallic()
+    if scf_is_metallic or bands_is_metallic:
         criteria = {
             "id": id_,
-            "band_gap": 0.0,
+            "scf_band_gap": 0.0,
+            "bands_band_gap": 0.0,
+            "single_shot_band_gap": 0.0,
             "electron_effective_mass": np.nan,
             "hole_effective_mass": np.nan,
             "meets_band_gap": False,
@@ -45,10 +58,9 @@ def _compute_criteria(id_: str) -> dict:
             "effective_masses": [],
         }
     else:
-        band_gap = material.bands.band_gap
-        segments = material.bands.path_segments
-        cbm = material.bands.cbm
-        vbm = material.bands.vbm
+        segments = material_bands.bands.path_segments
+        cbm = material_bands.bands.cbm
+        vbm = material_bands.bands.vbm
         effective_masses = []
         for i, segment in enumerate(segments):
             integral_effective_masses = segment.compute_integral_line_effective_mass(
@@ -81,18 +93,22 @@ def _compute_criteria(id_: str) -> dict:
             )
 
         electron_effective_mass = np.nanmax(
-            [val["integral_electron"] for val in effective_masses if val["contains_cbm"]]
+            [val["integral_electron"] for val in effective_masses if val["contains_cbm"]], initial=-np.inf
         )
-        hole_effective_mass = np.nanmin([val["integral_hole"] for val in effective_masses if val["contains_vbm"]])
+        hole_effective_mass = np.nanmin(
+            [val["integral_hole"] for val in effective_masses if val["contains_vbm"]], initial=+np.inf
+        )
 
         criteria = {
             "id": id_,
-            "band_gap": band_gap,
+            "scf_band_gap": material_scf.bands.band_gap,
+            "bands_band_gap": material_bands.bands.band_gap,
+            "single_shot_band_gap": material_single_shot.bands.band_gap,
             "electron_effective_mass": electron_effective_mass,
             "hole_effective_mass": hole_effective_mass,
-            "meets_band_gap": bool(band_gap >= 0.5),
-            "meets_electron_effective_mass": bool(0.0 <= electron_effective_mass <= 0.5),
-            "meets_hole_effective_mass": bool(-1.0 <= hole_effective_mass <= 0.0),
+            "meets_band_gap": bool(material_scf.bands.band_gap >= 0.5),
+            "meets_electron_effective_mass": bool(0.0 < electron_effective_mass <= 0.5),
+            "meets_hole_effective_mass": bool(-1.0 <= hole_effective_mass < 0.0),
             "cbm": cbm,
             "vbm": vbm,
             "effective_masses": effective_masses,
@@ -107,65 +123,79 @@ def _compute_criteria(id_: str) -> dict:
 
 # %%
 def main():
-    with h5py.File(MAT_HDF, "r") as f:
-        ids = [id_ for id_ in f.keys() if f"{id_}/bands" in f]
+    for train_test in ("test", "train"):
+        with h5py.File(MAT_HDF, "r") as f:
+            g = f[train_test]
+            ids = [id_ for id_ in g.keys() if f"{id_}/bands" in g]
 
-    pbar = tqdm(ids, desc="Compute TCM criteria", ncols=80)
-    with Pool(processes=12, maxtasksperchild=1) as p:
-        criteria = p.map(_compute_criteria, pbar)
+        pbar = tqdm(ids, desc="Compute TCM criteria", ncols=80)
+        with Pool(processes=12, maxtasksperchild=1) as p:
+            criteria = p.map(_compute_criteria, pbar)
 
-    arrays = {
-        "id": [],
-        "cbm": [],
-        "vbm": [],
-        "band_gap": [],
-        "electron_effective_mass": [],
-        "hole_effective_mass": [],
-        "meets_band_gap": [],
-        "meets_electron_effective_mass": [],
-        "meets_hole_effective_mass": [],
-        "meets_n_tcm_criteria": [],
-        "meets_p_tcm_criteria": [],
-        "meets_np_tcm_criteria": [],
-        "meets_tcm_criteria": [],
-    }
-    for mat_criteria in criteria:
-        for key, value in arrays.items():
-            value.append(mat_criteria[key])
+        arrays = {
+            "id": [],
+            "cbm": [],
+            "vbm": [],
+            "scf_band_gap": [],
+            "bands_band_gap": [],
+            "single_shot_band_gap": [],
+            "electron_effective_mass": [],
+            "hole_effective_mass": [],
+            "meets_band_gap": [],
+            "meets_electron_effective_mass": [],
+            "meets_hole_effective_mass": [],
+            "meets_n_tcm_criteria": [],
+            "meets_p_tcm_criteria": [],
+            "meets_np_tcm_criteria": [],
+            "meets_tcm_criteria": [],
+        }
+        for mat_criteria in criteria:
+            for key, value in arrays.items():
+                value.append(mat_criteria[key])
 
-    with h5py.File(TARGET_HDF, "w") as f:
-        f.create_dataset("id", data=arrays["id"])
-        f.create_dataset("cbm", data=arrays["cbm"])
-        f["cbm"].attrs["units"] = "eV"
-        f.create_dataset("vbm", data=arrays["vbm"])
-        f["vbm"].attrs["units"] = "eV"
-        f.create_dataset("band_gap", data=arrays["band_gap"])
-        f["band_gap"].attrs["units"] = "eV"
-        f.create_dataset("electron_effective_mass", data=arrays["electron_effective_mass"])
-        f["electron_effective_mass"].attrs["units"] = "m_e"
-        f.create_dataset("hole_effective_mass", data=arrays["hole_effective_mass"])
-        f["hole_effective_mass"].attrs["units"] = "m_e"
-        f.create_dataset("meets_band_gap", data=arrays["meets_band_gap"])
-        f.create_dataset("meets_electron_effective_mass", data=arrays["meets_electron_effective_mass"])
-        f.create_dataset("meets_hole_effective_mass", data=arrays["meets_hole_effective_mass"])
-        f.create_dataset("meets_n_tcm_criteria", data=arrays["meets_n_tcm_criteria"])
-        f.create_dataset("meets_p_tcm_criteria", data=arrays["meets_p_tcm_criteria"])
-        f.create_dataset("meets_np_tcm_criteria", data=arrays["meets_np_tcm_criteria"])
-        f.create_dataset("meets_tcm_criteria", data=arrays["meets_tcm_criteria"])
-
-    with h5py.File(EFF_MASS_HDF, "w") as f:
-        for id_, mat_criteria in zip(ids, criteria):
-            g = f.create_group(id_)
-            g.create_dataset("electron_effective_mass", data=mat_criteria["electron_effective_mass"])
+        with h5py.File(TARGET_HDF, "a") as f:
+            if train_test in f:
+                del f[train_test]
+            g = f.create_group(train_test)
+            g.create_dataset("id", data=arrays["id"])
+            g.create_dataset("cbm", data=arrays["cbm"])
+            g["cbm"].attrs["units"] = "eV"
+            g.create_dataset("vbm", data=arrays["vbm"])
+            g["vbm"].attrs["units"] = "eV"
+            g.create_dataset("scf_band_gap", data=arrays["scf_band_gap"])
+            g["scf_band_gap"].attrs["units"] = "eV"
+            g.create_dataset("bands_band_gap", data=arrays["bands_band_gap"])
+            g["bands_band_gap"].attrs["units"] = "eV"
+            g.create_dataset("single_shot_band_gap", data=arrays["single_shot_band_gap"])
+            g["single_shot_band_gap"].attrs["units"] = "eV"
+            g.create_dataset("electron_effective_mass", data=arrays["electron_effective_mass"])
             g["electron_effective_mass"].attrs["units"] = "m_e"
-            g.create_dataset("hole_effective_mass", data=mat_criteria["hole_effective_mass"])
+            g.create_dataset("hole_effective_mass", data=arrays["hole_effective_mass"])
             g["hole_effective_mass"].attrs["units"] = "m_e"
-            for semgment_eff_mass in mat_criteria["effective_masses"]:
-                segment_group = g.create_group(f"segment_{semgment_eff_mass['segment']}")
-                for key, value in semgment_eff_mass.items():
-                    segment_group.create_dataset(key, data=value)
-                    if "electron" in key or "hole" in key:
-                        segment_group[key].attrs["units"] = "m_e"
+            g.create_dataset("meets_band_gap", data=arrays["meets_band_gap"])
+            g.create_dataset("meets_electron_effective_mass", data=arrays["meets_electron_effective_mass"])
+            g.create_dataset("meets_hole_effective_mass", data=arrays["meets_hole_effective_mass"])
+            g.create_dataset("meets_n_tcm_criteria", data=arrays["meets_n_tcm_criteria"])
+            g.create_dataset("meets_p_tcm_criteria", data=arrays["meets_p_tcm_criteria"])
+            g.create_dataset("meets_np_tcm_criteria", data=arrays["meets_np_tcm_criteria"])
+            g.create_dataset("meets_tcm_criteria", data=arrays["meets_tcm_criteria"])
+
+        with h5py.File(EFF_MASS_HDF, "a") as f:
+            if train_test in f:
+                del f[train_test]
+            g_train_test = f.create_group(train_test)
+            for id_, mat_criteria in zip(ids, criteria):
+                g = g_train_test.create_group(id_)
+                g.create_dataset("electron_effective_mass", data=mat_criteria["electron_effective_mass"])
+                g["electron_effective_mass"].attrs["units"] = "m_e"
+                g.create_dataset("hole_effective_mass", data=mat_criteria["hole_effective_mass"])
+                g["hole_effective_mass"].attrs["units"] = "m_e"
+                for semgment_eff_mass in mat_criteria["effective_masses"]:
+                    segment_group = g.create_group(f"segment_{semgment_eff_mass['segment']}")
+                    for key, value in semgment_eff_mass.items():
+                        segment_group.create_dataset(key, data=value)
+                        if "electron" in key or "hole" in key:
+                            segment_group[key].attrs["units"] = "m_e"
 
 
 # %%

@@ -1,24 +1,23 @@
 """Fermi level solvers."""
 
+import logging
 import typing as ty
 
 import numpy as np
 import numpy.typing as npt
 import scipy as sp
 
-# from .occupation import compute_n_electrons, compute_n_electrons_derivative, compute_n_electrons_2nd_derivative
-from .occupation import compute_n_electrons_2nd_derivative_python as compute_n_electrons_2nd_derivative
-from .occupation import compute_n_electrons_derivative_python as compute_n_electrons_derivative
-from .occupation import compute_n_electrons_python as compute_n_electrons
+from .occupation import compute_n_electrons, compute_n_electrons_2nd_derivative, compute_n_electrons_derivative
+from .smearing import Cold, Delta, FermiDirac, Gaussian, smearing_from_name
+
+LOGGER = logging.getLogger(__name__)
 
 __all__ = (
     "find_fermi_energy",
     "find_fermi_energy_zero_temp",
     "find_fermi_energy_bisection",
-    "find_fermi_energy_two_stage",
+    "find_fermi_energy_advanced",
 )
-
-from .smearing import Cold, Delta, FermiDirac, Gaussian, smearing_from_name
 
 
 def find_fermi_energy(  # pylint: disable=too-many-arguments
@@ -28,7 +27,11 @@ def find_fermi_energy(  # pylint: disable=too-many-arguments
     smearing_width: float,
     n_electrons: int,
     n_electrons_tol: float = 1e-6,
-) -> float:
+    n_electrons_kwargs: ty.Optional[dict] = None,
+    dn_electrons_kwargs: ty.Optional[dict] = None,
+    ddn_electrons_kwargs: ty.Optional[dict] = None,
+    newton_kwargs: ty.Optional[ty.Dict[str, ty.Any]] = None,
+) -> ty.Dict[str, ty.Any]:
     """Find the Fermi level by bisection, two-stage algorithm, or at zero temperature depending on the smearing type.
 
     Args:
@@ -38,6 +41,10 @@ def find_fermi_energy(  # pylint: disable=too-many-arguments
         smearing_width (float): smearing width.
         n_electrons (int): target number of electrons.
         n_electrons_tol (float, optional): tolerance for the number of electrons. Defaults to 1e-6.
+        n_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons`.
+        dn_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons_derivative`.
+        ddn_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons_2nd_derivative`.
+        newton_kwargs (ty.Optional[ty.Dict]): keyword arguments for `scipy.optimize.root_scalar`.
 
     Raises:
         ValueError: if the smearing class returned by `smearing_from_name` is unknown.
@@ -45,20 +52,36 @@ def find_fermi_energy(  # pylint: disable=too-many-arguments
     Returns:
         float: Fermi energy.
     """
+    n_electrons_kwargs = n_electrons_kwargs or {}
     smearing_cls = smearing_from_name(smearing_type)
     if smearing_cls is Delta:
-        fermi_energy = find_fermi_energy_zero_temp(eigenvalues, weights, n_electrons)
+        fermi_result = find_fermi_energy_zero_temp(eigenvalues, weights, n_electrons)
     elif smearing_cls in (Gaussian, FermiDirac):
-        fermi_energy = find_fermi_energy_bisection(
-            eigenvalues, weights, smearing_type, smearing_width, n_electrons, n_electrons_tol
+        fermi_result = find_fermi_energy_bisection(
+            eigenvalues,
+            weights,
+            smearing_type,
+            smearing_width,
+            n_electrons,
+            n_electrons_tol,
+            n_electrons_kwargs=n_electrons_kwargs,
         )
     elif smearing_cls is Cold:
-        fermi_energy = find_fermi_energy_two_stage(
-            eigenvalues, weights, smearing_type, smearing_width, n_electrons, n_electrons_tol
+        fermi_result = find_fermi_energy_advanced(
+            eigenvalues,
+            weights,
+            smearing_type,
+            smearing_width,
+            n_electrons,
+            n_electrons_tol,
+            n_electrons_kwargs=n_electrons_kwargs,
+            dn_electrons_kwargs=dn_electrons_kwargs,
+            ddn_electrons_kwargs=ddn_electrons_kwargs,
+            newton_kwargs=newton_kwargs,
         )
     else:
         raise ValueError(f"Unknown smearing class: {smearing_cls}")
-    return fermi_energy
+    return fermi_result
 
 
 def find_fermi_energy_zero_temp(
@@ -97,7 +120,8 @@ def find_fermi_energy_bisection(  # pylint: disable=too-many-arguments
     smearing_width: float,
     n_electrons: int,
     n_electrons_tol: float = 1e-6,
-) -> float:
+    n_electrons_kwargs: ty.Optional[dict] = None,
+) -> ty.Dict[str, ty.Any]:
     """Find the Fermi level by bisection.
 
     Adapated from DFTK.jl/src/occupation.jl.
@@ -109,13 +133,15 @@ def find_fermi_energy_bisection(  # pylint: disable=too-many-arguments
         smearing_width (float): smearing width.
         n_electrons (int): target number of electrons.
         n_electrons_tol (float, optional): tolerance for the number of electrons. Defaults to 1e-6.
+        n_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons`.
 
     Returns:
         float: Fermi energy.
     """
+    n_electrons_kwargs = n_electrons_kwargs or {}
 
     def objective(ef):
-        ne = compute_n_electrons(eigenvalues, weights, ef, smearing_type, smearing_width)
+        ne = compute_n_electrons(eigenvalues, weights, ef, smearing_type, smearing_width, **n_electrons_kwargs)
         return ne - n_electrons
 
     # Get rough bounds for the Fermi level
@@ -130,19 +156,19 @@ def find_fermi_energy_bisection(  # pylint: disable=too-many-arguments
         # Note that this is not the same as the Fermi level being the maximum band energy because of smearing
         # However, we'll return the maximum band energy so that the result doesn't depend on the smearing width
         # or our choice of guess bounds (bands.max() + 10 * smearing with)
-        return eigenvalues.max()
+        return {"fermi_energy": eigenvalues.max(), "flag": "max_eigenvalue"}
 
     fermi_energy = sp.optimize.bisect(objective, e_min, e_max)
     if np.abs(objective(fermi_energy)) > n_electrons_tol:
         raise RuntimeError(f"Failed to find Fermi energy with bisection: {fermi_energy}")
 
     if fermi_energy >= eigenvalues.max():
-        return eigenvalues.max()
+        return {"fermi_energy": eigenvalues.max(), "flag": "max_eigenvalue"}
 
-    return fermi_energy
+    return {"fermi_energy": fermi_energy, "flag": "bisection"}
 
 
-class _TwoStageObjective:
+class _RootScalarObjective:  # pylint: disable=too-few-public-methods,too-many-instance-attributes
     def __init__(  # pylint: disable=too-many-arguments
         self,
         eigenvalues: npt.ArrayLike,
@@ -150,106 +176,138 @@ class _TwoStageObjective:
         smearing_type: str,
         smearing_width: float,
         n_electrons: float,
+        n_electrons_kwargs: ty.Optional[dict] = None,
+        dn_electrons_kwargs: ty.Optional[dict] = None,
+        ddn_electrons_kwargs: ty.Optional[dict] = None,
+        fprime: bool = True,
+        fprime2: bool = True,
     ):
+        if fprime2 and not fprime:
+            raise ValueError("fprime2 requires fprime to be True.")
         self.eigenvalues: np.ndarray = np.ascontiguousarray(eigenvalues)
         self.weights: np.ndarray = np.ascontiguousarray(weights)
         self.smearing_type: str = str(smearing_type)
         self.smearing_width: float = float(smearing_width)
         self.n_electrons: float = float(n_electrons)
-        self._ne: float = 0.0
-        self._dne: float = 0.0
+        self.n_electrons_kwargs: dict = n_electrons_kwargs or {}
+        self.dn_electrons_kwargs: dict = dn_electrons_kwargs or {}
+        self.ddn_electrons_kwargs: dict = ddn_electrons_kwargs or {}
+        self.fprime: bool = fprime
+        self.fprime2: bool = fprime2
 
-    def objective(self, ef: float) -> float:
-        """Objective function for Newton minimization.
+    def __call__(self, ef: float) -> ty.Union[float, ty.Tuple[float, float], ty.Tuple[float, float, float]]:
+        ne = self._compute_n_electrons(ef)
+        f = (ne - self.n_electrons) ** 2
+        if not self.fprime and not self.fprime2:
+            return f
+        dne = self._compute_n_electrons_derivative(ef)
+        fprime = 2 * (ne - self.n_electrons) * dne
+        if not self.fprime2:
+            return f, fprime
+        ddne = self._compute_n_electrons_2nd_derivative(ef)
+        fprime2 = 2 * ((ne - self.n_electrons) * ddne + dne**2)
+        return f, fprime, fprime2
 
-        Args:
-            ef (float): Fermi energy
-
-        Returns:
-            float: (n_electrons(ef) - n_electrons_target)^2
-        """
-        self._ne = compute_n_electrons(self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width)
-        return (self._ne - self.n_electrons) ** 2
-
-    def objective_deriv(self, ef: float) -> float:
-        """Derivative of the objective function for Newton minimization.
-
-        Args:
-            ef (float): Fermi energy
-
-        Returns:
-            float: d((n_electrons(ef) - n_electrons_target)^2)/d(ef)
-        """
-        self._dne = compute_n_electrons_derivative(
-            self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width
+    def _compute_n_electrons(self, ef: float) -> float:
+        return compute_n_electrons(
+            self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width, **self.n_electrons_kwargs
         )
-        return 2 * (self._ne - self.n_electrons) * self._dne
 
-    def objective_2nd_deriv(self, ef: float) -> float:
-        """Second derivative of the objective function for Newton minimization.
-
-        Args:
-            ef (float): Fermi energy
-
-        Returns:
-            float: d^2((n_electrons(ef) - n_electrons_target)^2)/d(ef)^2
-        """
-        ddne = compute_n_electrons_2nd_derivative(
-            self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width
+    def _compute_n_electrons_derivative(self, ef: float) -> float:
+        return compute_n_electrons_derivative(
+            self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width, **self.dn_electrons_kwargs
         )
-        return 2 * ((self._ne - self.n_electrons) * ddne + self._dne**2)
+
+    def _compute_n_electrons_2nd_derivative(self, ef: float) -> float:
+        return compute_n_electrons_2nd_derivative(
+            self.eigenvalues, self.weights, ef, self.smearing_type, self.smearing_width, **self.ddn_electrons_kwargs
+        )
 
 
-def find_fermi_energy_two_stage(  # pylint: disable=too-many-arguments
+def find_fermi_energy_advanced(  # pylint: disable=too-many-arguments
     eigenvalues: npt.ArrayLike,
     weights: npt.ArrayLike,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
-    n_electrons: int,
+    n_electrons: float,
     n_electrons_tol: float = 1e-6,
     newton_kwargs: ty.Optional[ty.Dict[str, ty.Any]] = None,
-) -> float:
-    """Find the Fermi level using a two-stage algorithm which starts from a bisection with Gaussian
-    smearing and follows up with a Newton refinement with the requested smearing.
+    n_electrons_kwargs: ty.Optional[dict] = None,
+    dn_electrons_kwargs: ty.Optional[dict] = None,
+    ddn_electrons_kwargs: ty.Optional[dict] = None,
+) -> ty.Dict[str, ty.Any]:
+    """Find the Fermi level using a multi-stage algorithm as described in
+    F.J. dos Santos and N. Marzari, PRB 107, 195122 (2023).
 
-    Adapated from DFTK.jl/src/occupation.jl.
+        # Gaussian bisection
+        eF = bisection(enk, wk, delta[gauss], sigma, Ne)
+        if |Ne - Ne[cold](eF)| < tol:
+            return eF
+        # Cold Newton refinement
+        eF = newton(enk, wk, delta[cold], sigma, Ne)
+        if |Ne - Ne[cold](eF)| < tol:
+            return eF
+        # Cold bisection fallback
+        eF = bisection(enk, wk, sigma, delta[cold], Ne)
+        if |Ne - Ne[cold](eF)| < tol:
+            warn
+        return eF
 
     Args:
         eigenvalues (npt.ArrayLike): (n_spins, n_kpoints, n_bands) eigenvalues/bands array.
         weights (npt.ArrayLike): (n_kpoints, ) k-point weights array.
         smearing_type (ty.Union[str, int]): type of smearing (see `smearing_from_name`).
         smearing_width (float): smearing width
-        n_electrons (int): target number of electrons
+        n_electrons (float): target number of electrons
+        n_electrons_tol (float): tolerance on the number of electrons
+        newton_kwargs (ty.Optional[ty.Dict]): keyword arguments for `scipy.optimize.root_scalar`
+        n_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons`.
+        dn_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons_derivative`.
+        ddn_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons_2nd_derivative`.
 
     Returns:
         float: Fermi energy.
     """
+    objective = _RootScalarObjective(
+        eigenvalues,
+        weights,
+        smearing_type,
+        smearing_width,
+        n_electrons,
+        n_electrons_kwargs,
+        dn_electrons_kwargs,
+        ddn_electrons_kwargs,
+    )
+
     # Start with bisection and Gaussian smearing
-    bisection_fermi = find_fermi_energy_bisection(eigenvalues, weights, "gauss", smearing_width, n_electrons, np.inf)
+    gauss_bisection_fermi = find_fermi_energy_bisection(
+        eigenvalues, weights, "gauss", smearing_width, n_electrons, np.inf, n_electrons_kwargs
+    )["fermi_energy"]
+
+    if np.sqrt(objective(gauss_bisection_fermi)[0]) <= n_electrons_tol:
+        return {"fermi_energy": gauss_bisection_fermi, "flag": "gauss_bisection"}
 
     # If the bisection Fermi level is the maximum band energy, return it.
     # As noted in `find_fermi_energy_bisection`, this won't actually give the correct number of electrons
     # at non-zero smearing width, but it's the result that makes sense in this context.
-    if bisection_fermi >= eigenvalues.max():
-        return eigenvalues.max()
+    if gauss_bisection_fermi >= eigenvalues.max():
+        return {"fermi_energy": eigenvalues.max(), "flag": "max_eigenvalue"}
 
-    # Refine with Newton and the requested smearing (probably cold)
-    two_stage_fermi = bisection_fermi
+    newton_kwargs = newton_kwargs or {}
+    root_result = sp.optimize.root_scalar(
+        f=objective, fprime=True, fprime2=True, x0=gauss_bisection_fermi, method="halley", **newton_kwargs
+    )
+    newton_fermi = root_result.root
 
-    obj = _TwoStageObjective(eigenvalues, weights, smearing_type, smearing_width, n_electrons)
-    objective = obj.objective
-    objective_deriv = obj.objective_deriv
-    objective_2nd_deriv = obj.objective_2nd_deriv
+    if np.sqrt(objective(newton_fermi)[0]) <= n_electrons_tol:
+        return {"fermi_energy": newton_fermi, "flag": "newton"}
 
-    try:
-        if newton_kwargs is None:
-            newton_kwargs = {}
-        newton_fermi = sp.optimize.newton(
-            func=objective, fprime=objective_deriv, fprime2=objective_2nd_deriv, x0=bisection_fermi, **newton_kwargs
-        )
-        if np.abs(objective(newton_fermi)) <= n_electrons_tol:
-            two_stage_fermi = newton_fermi
-    except RuntimeError:
-        pass
+    # Fall back to bisection with cold smearing
+    cold_bisection_fermi = find_fermi_energy_bisection(
+        eigenvalues, weights, smearing_type, smearing_width, n_electrons, n_electrons_kwargs=n_electrons_kwargs
+    )["fermi_energy"]
 
-    return two_stage_fermi
+    if np.sqrt(objective(cold_bisection_fermi)[0]) > n_electrons_tol:
+        LOGGER.warning("Fallback to cold bisection failed to converge.")
+
+    return {"fermi_energy": cold_bisection_fermi, "flag": "cold_bisection"}

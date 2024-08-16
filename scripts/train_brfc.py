@@ -114,16 +114,16 @@ def load_data(data_dir: os.PathLike, database: str, calculation_type: str, featu
     with h5py.File(data_dir / database / "targets.h5", "r") as f:
         target_df = pd.DataFrame(
             data={
-                "id": f["id"][()].astype(str),
-                "meets_tcm_criteria": f["meets_tcm_criteria"][()],
+                "id": f["train"]["id"][()].astype(str),
+                "meets_tcm_criteria": f["train"]["meets_tcm_criteria"][()],
             }
         )
 
     with h5py.File(data_dir / database / "features.h5", "r") as f:
         feature_df = pd.DataFrame(
             data={
-                "id": f[f"{calculation_type}/{feature_path}"]["id"][()].astype(str),
-                "features": f[f"{calculation_type}/{feature_path}"]["features"][()].tolist(),
+                "id": f[f"train/{calculation_type}/{feature_path}"]["id"][()].astype(str),
+                "features": f[f"train/{calculation_type}/{feature_path}"]["features"][()].tolist(),
             }
         )
 
@@ -132,10 +132,7 @@ def load_data(data_dir: os.PathLike, database: str, calculation_type: str, featu
     y = df["meets_tcm_criteria"].to_numpy()
     id_ = df["id"].to_numpy()
 
-    # Create constant hold-out validation set of 10% of the data
-    X, X_val, y, y_val, id_, id_val = skms.train_test_split(X, y, id_, test_size=0.1, random_state=9997)
-
-    return (X, X_val, y, y_val, id_, id_val)
+    return X, y, id_
 
 
 def get_random_states(labels, train_sizes, min_populations=None, seed=9997):
@@ -161,7 +158,7 @@ def get_random_states(labels, train_sizes, min_populations=None, seed=9997):
 
 def train_evaluate(feature_path, train_sizes, random_states):
     results = []
-    X, _, y, _, id_, _ = load_data(pl.Path(DATA_DIR), DATABASE, CALCULATION_TYPE, feature_path)
+    X, y, id_ = load_data(pl.Path(DATA_DIR), DATABASE, CALCULATION_TYPE, feature_path)
 
     for train_size, random_state in zip(train_sizes, random_states):
         X_train, X_test, y_train, y_test, id_train, id_test = skms.train_test_split(
@@ -180,7 +177,9 @@ def train_evaluate(feature_path, train_sizes, random_states):
             }
         )
         creation_time = datetime.isoformat(datetime.now())
-        path = pl.Path(f"../models/{feature_path}/{train_size:.4f}_{random_state}_{creation_time}).pkl")
+        path = pl.Path(
+            f"../models/{CALCULATION_TYPE}/{feature_path}/{train_size:.4f}_{random_state}_{creation_time}).pkl"
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "wb") as fp:
             dump(model, fp, protocol=5)
@@ -193,7 +192,7 @@ def train_evaluate(feature_path, train_sizes, random_states):
 # %% Train models
 DATA_DIR = "../data/"
 DATABASE = "mc3d"
-CALCULATION_TYPE = "single_shot"
+CALCULATION_TYPE = "scf"
 PARALLEL = True
 FEATURE_PATHS = [
     "fermi_centered/0",  # -5:513:+5
@@ -241,14 +240,14 @@ def main():
     # Get constant random states for each train size and repeat so that the splits are the same for all feature types,
     # assuming the data are in the same order across feature types
     train_sizes = np.repeat(TRAIN_SIZES, N_REPEATS)
-    _, _, y, _, _, _ = load_data(pl.Path(DATA_DIR), DATABASE, CALCULATION_TYPE, FEATURE_PATHS[0])
+    _, y, _ = load_data(pl.Path(DATA_DIR), DATABASE, CALCULATION_TYPE, FEATURE_PATHS[0])
     random_states = get_random_states(y, train_sizes, min_populations={0: 1, 1: 1})
 
     _train_evaluate = partial(train_evaluate, train_sizes=train_sizes, random_states=random_states)
 
     feature_path_pbar = tqdm(FEATURE_PATHS, ncols=120)
     if PARALLEL:
-        with Pool(processes=12, maxtasksperchild=2) as pool:
+        with Pool(processes=14, maxtasksperchild=1) as pool:
             results = pool.map(_train_evaluate, feature_path_pbar)
     else:
         results = []
@@ -256,7 +255,7 @@ def main():
             results.append(_train_evaluate(feature_path))
 
     print("Saving results")
-    with h5py.File(pl.Path(DATA_DIR) / DATABASE / "brfc_metrics.h5", "a") as f:
+    with h5py.File(pl.Path(DATA_DIR) / DATABASE / "metrics_val.h5", "a") as f:
         feature_paths = [f"{CALCULATION_TYPE}/{feature_path}" for feature_path in FEATURE_PATHS]
         for feature_path, feature_results in zip(feature_paths, results):
             feature_results, creation_time = feature_results

@@ -53,9 +53,9 @@ def _equal_params_existing(group, params):
 #     return material_ids, features
 
 
-def load_images(hdf, calculation_type: str):
+def load_images(hdf, train_test: str, calculation_type: str):
     images = []
-    for material in hdf.values():
+    for material in hdf[train_test].values():
         if calculation_type in material:
             image = Atoms(**{k: v[()] for k, v in material[calculation_type]["atoms"].items()})
             image.info = dict(material[calculation_type]["atoms"].attrs)
@@ -66,62 +66,64 @@ def load_images(hdf, calculation_type: str):
 def main():
     mode = "w" if OVERWRITE_ALL else "a"
     with h5py.File(FEAT_HDF, mode) as f_features:
-        for calculation_type in ["single_shot", "scf"]:
-            type_key = f"{calculation_type}/soap"
-            if type_key in f_features.keys():
-                g_type = f_features[type_key]
-            else:
-                g_type = f_features.create_group(type_key)
-            for params in SOAP_PARAMS:
-                params = params.copy()
-                # Read in the images for each featurization; they may be modified below to remove species information
-                with h5py.File(MAT_HDF, "r") as f_materials:
-                    images = load_images(f_materials, calculation_type)
-                # Construct the species list
-                if not params["species"]:
-                    for image in images:
-                        image.set_atomic_numbers(np.ones(image.get_global_number_of_atoms(), dtype=int))
-                    params["species"] = [1]
+        for train_test in ("test", "train"):
+            g_train_test = f_features[train_test] if train_test in f_features else f_features.create_group(train_test)
+            for calculation_type in ["single_shot", "scf"]:
+                type_key = f"{calculation_type}/soap"
+                if type_key in g_train_test.keys():
+                    g_type = g_train_test[type_key]
                 else:
-                    params["species"] = np.unique(np.concatenate([image.numbers for image in images]))
-                if existing_key := _equal_params_existing(g_type, params):
-                    if OVERWRITE_NEW:
-                        del g_type[existing_key]
+                    g_type = g_train_test.create_group(type_key)
+                for params in SOAP_PARAMS:
+                    params = params.copy()
+                    # Read in the images for each featurization; they may be modified below to remove species information
+                    with h5py.File(MAT_HDF, "r") as f_materials:
+                        images = load_images(f_materials, train_test, calculation_type)
+                    # Construct the species list
+                    if not params["species"]:
+                        for image in images:
+                            image.set_atomic_numbers(np.ones(image.get_global_number_of_atoms(), dtype=int))
+                        params["species"] = [1]
                     else:
-                        continue
-                # Get the group for this feature instance
-                instance_key = str(max([int(key) for key in g_type.keys()], default=-1) + 1)
-                g_instance = g_type.create_group(instance_key)
-                # Set the instance group attributes
-                for k, v in _flatten(params).items():
-                    g_instance.attrs[k] = v
-                # Construct the featurizer
-                soap_dscribe = SOAP(**params)
-                # Initialize the target arrays in the HDF5 file
-                n_features = soap_dscribe.get_number_of_features()
-                material_ids = g_instance.create_dataset(
-                    "id", (len(images),), dtype=h5py.string_dtype(encoding="utf-8", length=None)
-                )
-                chunk_rows = max(512_000 // np.zeros(n_features).nbytes, 1)
-                chunk_cols = n_features
-                features = g_instance.create_dataset(
-                    name="features",
-                    shape=(len(images), n_features),
-                    dtype=FEATURES_DTYPE,
-                    compression="gzip",
-                    chunks=(chunk_rows, chunk_cols),
-                    shuffle=True,
-                )
-                # Compute the SOAP features and store them in the HDF5 file
-                feature_chunk = chunk_rows * N_JOBS
-                for i in tqdm(range(0, len(images), feature_chunk), desc="Featurizing chunks: "):
-                    image_chunk = images[i : i + feature_chunk]
-                    material_ids[i : i + feature_chunk] = [str(image.info["id"]) for image in image_chunk]
-                    if params.get("sparse", False):
-                        features[i : i + feature_chunk] = soap_dscribe.create(image_chunk, n_jobs=N_JOBS).todense()
-                    else:
-                        features[i : i + feature_chunk] = soap_dscribe.create(image_chunk, n_jobs=N_JOBS)
-                f_features.flush()
+                        params["species"] = np.unique(np.concatenate([image.numbers for image in images]))
+                    if existing_key := _equal_params_existing(g_type, params):
+                        if OVERWRITE_NEW:
+                            del g_type[existing_key]
+                        else:
+                            continue
+                    # Get the group for this feature instance
+                    instance_key = str(max([int(key) for key in g_type.keys()], default=-1) + 1)
+                    g_instance = g_type.create_group(instance_key)
+                    # Set the instance group attributes
+                    for k, v in _flatten(params).items():
+                        g_instance.attrs[k] = v
+                    # Construct the featurizer
+                    soap_dscribe = SOAP(**params)
+                    # Initialize the target arrays in the HDF5 file
+                    n_features = soap_dscribe.get_number_of_features()
+                    material_ids = g_instance.create_dataset(
+                        "id", (len(images),), dtype=h5py.string_dtype(encoding="utf-8", length=None)
+                    )
+                    chunk_rows = max(512_000 // np.zeros(n_features).nbytes, 1)
+                    chunk_cols = n_features
+                    features = g_instance.create_dataset(
+                        name="features",
+                        shape=(len(images), n_features),
+                        dtype=FEATURES_DTYPE,
+                        compression="gzip",
+                        chunks=(chunk_rows, chunk_cols),
+                        shuffle=True,
+                    )
+                    # Compute the SOAP features and store them in the HDF5 file
+                    feature_chunk = chunk_rows * N_JOBS
+                    for i in tqdm(range(0, len(images), feature_chunk), desc="Featurizing chunks: "):
+                        image_chunk = images[i : i + feature_chunk]
+                        material_ids[i : i + feature_chunk] = [str(image.info["id"]) for image in image_chunk]
+                        if params.get("sparse", False):
+                            features[i : i + feature_chunk] = soap_dscribe.create(image_chunk, n_jobs=N_JOBS).todense()
+                        else:
+                            features[i : i + feature_chunk] = soap_dscribe.create(image_chunk, n_jobs=N_JOBS)
+                    f_features.flush()
 
 
 # %%

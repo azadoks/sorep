@@ -1,10 +1,7 @@
 """Band structure data class and related functions."""
 
-import json
-import os
 import typing as ty
 
-from ase.io import read
 import h5py
 import numpy as np
 import numpy.typing as npt
@@ -133,50 +130,6 @@ class BandStructure:
         )
 
     @classmethod
-    def from_files(
-        cls, npz_path: os.PathLike, xyz_path: os.PathLike, json_path: ty.Optional[os.PathLike] = None
-    ) -> "BandStructure":
-        """Load a band structure from an NPZ file containing arrays, an extended XYZ file containing a
-        periodic structure, and a JSON file containing metadata.
-
-        The NPZ file should contain the following arrays:
-        - eigenvalues: (n_spins, n_kpoints, n_bands) Eigenvalues/bands.
-        - kpoints: (n_kpoints, 3) K-points.
-        - weights: (n_kpoints,) K-point weights.
-        - occupations: (n_spins, n_kpoints, n_bands) Occupations (optional).
-        - labels: (n_labels,) Labels (optional).
-        - label_numbers: (n_labels,) Label indices (optional).
-
-        The JSON file should contain the following metadata:
-        - fermi_energy: Fermi energy.
-        - number_of_electrons: Number of electrons.
-
-        Args:
-            path (os.PathLike): Path to the NPZ file.
-        """
-        # Load arrays (eigenvalues/bands, k-points, etc.)
-        with open(npz_path, "rb") as fp:
-            arrays = dict(np.load(fp))
-        # Load structure
-        with open(xyz_path, "r", encoding="utf-8") as fp:
-            atoms = read(fp, index=0)
-        # Load metadata (Fermi energy, number of electrons, etc.)
-        metadata = {}
-        if json_path:
-            with open(json_path, "r", encoding="utf-8") as fp:
-                metadata = json.load(fp)
-        # Ignore occupations and Fermi energy if occupations all zeros
-        if np.all(np.isclose(arrays["occupations"], 0)):
-            arrays.pop("occupations")
-            metadata.pop("fermi_energy", None)
-        return cls(
-            **arrays,
-            cell=atoms.cell.array,
-            fermi_energy=metadata.get("fermi_energy"),
-            n_electrons=metadata.get("number_of_electrons"),
-        )
-
-    @classmethod
     def from_hdf(
         cls,
         hdf: ty.Union[h5py.Group, h5py.File],
@@ -222,6 +175,30 @@ class BandStructure:
             n_electrons=hdf["n_electrons"][()] if "n_electrons" in hdf else None,
             kpoints_are_cartesian=hdf["kpoints"].attrs["units"] == "dimensionless",
         )
+
+    def to_hdf(self, hdf) -> None:
+        """Save the band structure to an HDF5 file.
+
+        Args:
+            hdf (h5py.File): HDF5 File.
+        """
+        hdf.create_dataset("eigenvalues", data=self.eigenvalues, compression="gzip", shuffle=True)
+        hdf["eigenvalues"].attrs["units"] = "eV"
+        hdf.create_dataset("kpoints", data=self.fractional_kpoints, compression="gzip", shuffle=True)
+        hdf["kpoints"].attrs["units"] = "dimensionless"
+        hdf.create_dataset("weights", data=self.weights, compression="gzip", shuffle=True)
+        hdf.create_dataset("cell", data=self.cell, compression="gzip", shuffle=True)
+        hdf["cell"].attrs["units"] = "angstrom"
+        if self.occupations is not None:
+            hdf.create_dataset("occupations", data=self.occupations, compression="gzip", shuffle=True)
+        if self.labels is not None:
+            hdf.create_dataset("labels", data=self.labels)
+        if self.label_numbers is not None:
+            hdf.create_dataset("label_numbers", data=self.label_numbers)
+        if self.fermi_energy is not None:
+            hdf.create_dataset("fermi_energy", data=self.fermi_energy)
+        if self.n_electrons is not None:
+            hdf.create_dataset("n_electrons", data=self.n_electrons)
 
     @property
     def n_spins(self) -> int:
@@ -342,7 +319,11 @@ class BandStructure:
         return occupation.compute_occupations(self.eigenvalues, fermi_energy, smearing_type, smearing_width)
 
     def compute_n_electrons(
-        self, smearing_type: str, smearing_width: float, fermi_energy: ty.Optional[float] = None
+        self,
+        smearing_type: str,
+        smearing_width: float,
+        fermi_energy: ty.Optional[float] = None,
+        n_electrons_kwargs: ty.Optional[dict] = None,
     ) -> float:
         """Compute the number of electrons from the provided Fermi energy.
 
@@ -350,16 +331,51 @@ class BandStructure:
             smearing_type (str): Smearing type (see `smearing_from_name`).
             smearing_width (float): Smearing width.
             fermi_energy (ty.Optional[float]): Fermi energy. Defaults to the stored Fermi energy.
+            n_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons`.
 
         Returns:
             float: Fermi energy.
         """
         fermi_energy = fermi_energy if fermi_energy is not None else self.fermi_energy
+        n_electrons_kwargs = n_electrons_kwargs or {}
         return occupation.compute_n_electrons(
-            self.eigenvalues, self.weights, fermi_energy, smearing_type, smearing_width
+            self.eigenvalues, self.weights, fermi_energy, smearing_type, smearing_width, **n_electrons_kwargs
         )
 
-    def find_fermi_energy(self, smearing_type: str, smearing_width: float, n_electrons_tol: float = 1e-6) -> float:
+    def compute_n_electrons_derivative(
+        self,
+        smearing_type: str,
+        smearing_width: float,
+        fermi_energy: ty.Optional[float] = None,
+        dn_electrons_kwargs: ty.Optional[dict] = None,
+    ) -> float:
+        """Compute the number of electrons from the provided Fermi energy.
+
+        Args:
+            smearing_type (str): Smearing type (see `smearing_from_name`).
+            smearing_width (float): Smearing width.
+            fermi_energy (ty.Optional[float]): Fermi energy. Defaults to the stored Fermi energy.
+            dn_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons_derivative`.
+
+        Returns:
+            float: Fermi energy.
+        """
+        fermi_energy = fermi_energy if fermi_energy is not None else self.fermi_energy
+        dn_electrons_kwargs = dn_electrons_kwargs or {}
+        return occupation.compute_n_electrons_derivative(
+            self.eigenvalues, self.weights, fermi_energy, smearing_type, smearing_width, **dn_electrons_kwargs
+        )
+
+    def find_fermi_energy(  # pylint: disable=too-many-arguments
+        self,
+        smearing_type: str,
+        smearing_width: float,
+        n_electrons_tol: float = 1e-6,
+        n_electrons_kwargs: ty.Optional[dict] = None,
+        dn_electrons_kwargs: ty.Optional[dict] = None,
+        ddn_electrons_kwargs: ty.Optional[dict] = None,
+        newton_kwargs: ty.Optional[ty.Dict[str, ty.Any]] = None,
+    ) -> float:
         """Find a Fermi energy that yields the correct number of electrons.
 
         Args:
@@ -367,6 +383,10 @@ class BandStructure:
             smearing_width (float): smearing width
             n_electrons_tol (float, optional): tolerance on the number of electrons as a function of the found Fermi
                 energy. Defaults to 1e-6.
+            n_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons`.
+            dn_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons_derivative`.
+            ddn_electrons_kwargs (ty.Optional[dict]): Keyword arguments to pass to `compute_n_electrons_2nd_derivative`.
+            newton_kwargs (ty.Optional[ty.Dict]): Keyword arguments to pass to `scipy.optimize.root_scalar`.
 
         Raises:
             ValueError: if the number of electrons is unknown.
@@ -377,11 +397,20 @@ class BandStructure:
         if self.n_electrons is None:
             raise ValueError("Cannot find the Fermi level if the number of electrons is unknown.")
         return fermi.find_fermi_energy(
-            self.eigenvalues, self.weights, smearing_type, smearing_width, self.n_electrons, n_electrons_tol
+            eigenvalues=self.eigenvalues,
+            weights=self.weights,
+            smearing_type=smearing_type,
+            smearing_width=smearing_width,
+            n_electrons=self.n_electrons,
+            n_electrons_tol=n_electrons_tol,
+            n_electrons_kwargs=n_electrons_kwargs,
+            dn_electrons_kwargs=dn_electrons_kwargs,
+            ddn_electrons_kwargs=ddn_electrons_kwargs,
+            newton_kwargs=newton_kwargs,
         )
 
     def compute_smeared_dos(
-        self, energies: npt.ArrayLike, smearing_type: ty.Union[str, int], smearing_width: float
+        self, energies: npt.ArrayLike, smearing_type: ty.Union[str, int], smearing_width: float, **kwargs
     ) -> npt.ArrayLike:
         """Compute a smeared density of states from the band structure (see `smeared_dos`).
 
@@ -393,7 +422,7 @@ class BandStructure:
         Returns:
             npt.ArrayLike: (n_spins, n_energies) array containing the DOS for each spin channel
         """
-        return smeared_dos(energies, self.eigenvalues, self.weights, smearing_type, smearing_width)
+        return smeared_dos(energies, self.eigenvalues, self.weights, smearing_type, smearing_width, **kwargs)
 
     def is_metallic(self, tol: float = 1e-6) -> ty.Union[bool, None]:
         """Check if the band structure is metallic.
@@ -416,9 +445,11 @@ class BandStructure:
         # The first n_bands rows of the resulting array correspond to spin 0, and the rest to spin 1
         bands = np.transpose(self.eigenvalues, (0, 2, 1)).reshape((self.n_spins * self.n_bands, self.n_kpoints))
 
-        return bool(
+        band_crosses_fermi = bool(
             np.any(np.any(bands < self.fermi_energy - tol, axis=1) & np.any(bands > self.fermi_energy + tol, axis=1))
         )
+
+        return band_crosses_fermi
 
     def is_insulating(self, tol: float = 1e-6) -> ty.Optional[bool]:
         """Check if the band structure is insulating.

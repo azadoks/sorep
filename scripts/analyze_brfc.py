@@ -7,43 +7,41 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scipy.signal as sps
 import seaborn as sns
-import sklearn.metrics as skm
 
 # %%
 DATA_DIR = pl.Path("../data")
 DATABASE = "mc3d"
-CALCULATION_TYPE = "single_shot"
+CALCULATION_TYPE = "scf"
+TRAIN_TEST = "test"
+
+N_MATERIALS = 21691
+N_TCM = 1909
+F_TCM_BACKGROUND = N_TCM / N_MATERIALS
 # %%
 with h5py.File(DATA_DIR / DATABASE / "targets.h5", "r") as f:
-    TARGET_DF = pd.DataFrame({k: v[()] for (k, v) in f.items()})
+    TARGET_DF = pd.DataFrame({k: v[()] for (k, v) in f["test"].items()})
+    TARGET_DF["id"] = TARGET_DF["id"].apply(lambda x: x.decode("utf-8"))
 
 METRICS_DFS = {}
-with h5py.File(DATA_DIR / DATABASE / "brfc_metrics.h5", "r") as f:
+with h5py.File(DATA_DIR / DATABASE / f"metrics_{TRAIN_TEST}.h5", "r") as f:
     g = f[CALCULATION_TYPE]
     for feature_name, feature_group in g.items():
         for feature_id, group in feature_group.items():
-            METRICS_DFS[f"{feature_name}/{feature_id}"] = pd.DataFrame({k: v[()].tolist() for (k, v) in group.items()})
-
-# IMPORTANCES = {}
-# with h5py.File(f"../data/{DATABASE}_permutation_importance_{CALCULATION_TYPE}.h5", "r") as f:
-#     for feature_name, feature_group in f.items():
-#         for feature_instance, instance_group in feature_group.items():
-#             IMPORTANCES[f"{feature_name}/{feature_instance}"] = {"values": [], "mean": [], "std": []}
-#             for random_state, random_state_group in instance_group.items():
-#                 IMPORTANCES[f"{feature_name}/{feature_instance}"]["values"].append(
-#                     random_state_group["importances"][()].tolist()
-#                 )
-#                 IMPORTANCES[f"{feature_name}/{feature_instance}"]["mean"].append(
-#                     random_state_group["importances_mean"][()].tolist()
-#                 )
-#                 IMPORTANCES[f"{feature_name}/{feature_instance}"]["std"].append(
-#                     random_state_group["importances_std"][()].tolist()
-#                 )
-
-#     for key, value in IMPORTANCES.items():
-#         IMPORTANCES[key]["values"] = np.concatenate(value["values"], axis=1).T
+            df = pd.DataFrame({k: v[()].tolist() for (k, v) in group.items()})
+            df["true_positive"] = df["confusion_matrix"].apply(lambda x: x[1][1])
+            df["false_positive"] = df["confusion_matrix"].apply(lambda x: x[0][1])
+            df["true_negative"] = df["confusion_matrix"].apply(lambda x: x[0][0])
+            df["false_negative"] = df["confusion_matrix"].apply(lambda x: x[1][0])
+            df["true_positive_rate"] = df["true_positive"] / (df["true_positive"] + df["false_negative"])
+            df["false_positive_rate"] = df["false_positive"] / (df["false_positive"] + df["true_negative"])
+            df["train_number"] = df["train_size"] * TARGET_DF.shape[0]
+            df["yield"] = (df["true_positive"] + df["train_number"] * F_TCM_BACKGROUND) / (
+                df["false_positive"] + df["true_positive"] + df["train_number"]
+            )
+            df["speedup"] = df["yield"] / F_TCM_BACKGROUND
+            df["f_found"] = (df["train_number"] * F_TCM_BACKGROUND + df["true_positive_rate"] * N_TCM) / N_TCM
+            METRICS_DFS[f"{feature_name}/{feature_id}"] = df
 # %%
 FEATURE_KWARGS = {
     "vbm_centered/0": {
@@ -57,7 +55,7 @@ FEATURE_KWARGS = {
         "xtick_labels": [-2, r"$E_{\mathrm{VBM}}$", 2, 4, 6],
         "vlines": [
             {"x": 0.5, "label": r"$E_{g}=0.5$", "c": "k", "ls": ":", "alpha": 0.5},
-            {"x": 0.0, "label": r"$E_{VBM}$", "c": "k", "ls": "-.", "alpha": 0.5},
+            {"x": 0.0, "label": r"$E_{VBM}$", "c": "#aa0000", "ls": "-.", "alpha": 0.5},
         ],
     },
     "fermi_centered/0": {
@@ -72,7 +70,7 @@ FEATURE_KWARGS = {
         "vlines": [
             {"x": -0.25, "label": r"$E_{g}=0.5$", "c": "k", "ls": ":", "alpha": 0.5},
             {"x": 0.25, "c": "k", "ls": ":", "alpha": 0.5},
-            {"x": 0.0, "label": r"$E_{F}$", "c": "k", "ls": "-.", "alpha": 0.5},
+            {"x": 0.0, "label": r"$E_{F}$", "c": "#008000", "ls": "-.", "alpha": 0.5},
         ],
     },
     "cbm_centered/0": {
@@ -86,7 +84,7 @@ FEATURE_KWARGS = {
         "xtick_labels": [-6, -4, -2, r"$E_{\mathrm{CBM}}$", 2],
         "vlines": [
             {"x": -0.5, "label": r"$E_{g}=0.5$", "c": "k", "ls": ":", "alpha": 0.5},
-            {"x": 0.0, "label": r"$E_{CBM}$", "c": "k", "ls": "-.", "alpha": 0.5},
+            {"x": 0.0, "label": r"$E_{CBM}$", "c": "#000080", "ls": "-.", "alpha": 0.5},
         ],
     },
     # "vbm_cbm_concatenated/0": {
@@ -137,37 +135,34 @@ FEATURE_KWARGS = {
         "fill_kwargs": {"color": "grey", "alpha": 0.3},
         "errorbar_kwargs": {"c": "grey", "capsize": 3, "marker": "."},
         "line_x": np.arange(550),
-        # "xticks": [-3, -2 -1, 0, 1, 2, 3],
-        # "xtick_labels": [-1, r"$E_{\mathrm{VBM}}$", r"$\pm$1", r"$E_{F}$", r"$\pm$1", r"$E_{\mathrm{CBM}}$", 1],
-        # "vlines": [],
     },
 }
 
 
 # %%
 def plot_yield(target_df, metrics, avg="mean", error="std"):
-
+    metric_key = "yield"
     with plt.style.context("../sorep.mplstyle"):
         fig, ax = plt.subplots(dpi=300)
 
         for feature_id, kwargs in FEATURE_KWARGS.items():
             gb = metrics[feature_id].groupby(by="train_size")
             if avg == "mean":
-                yield_avg = gb["yield"].mean()
+                yield_avg = gb[metric_key].mean()
             elif avg == "median":
-                yield_avg = gb["yield"].median()
+                yield_avg = gb[metric_key].median()
 
             ax.plot(yield_avg.index, yield_avg, **kwargs["line_kwargs"], marker=".", label=kwargs["shortname"])
             if error == "std":
-                yield_std = gb["yield"].std()
+                yield_std = gb[metric_key].std()
                 ax.fill_between(yield_avg.index, yield_avg - yield_std, yield_avg + yield_std, **kwargs["fill_kwargs"])
             elif error == "minmax":
-                yield_min = gb["yield"].min()
-                yield_max = gb["yield"].max()
+                yield_min = gb[metric_key].min()
+                yield_max = gb[metric_key].max()
                 ax.fill_between(yield_avg.index, yield_min, yield_max, **kwargs["fill_kwargs"])
             elif error == "iqr":
-                yield_q1 = gb["yield"].quantile(0.25)
-                yield_q3 = gb["yield"].quantile(0.75)
+                yield_q1 = gb[metric_key].quantile(0.25)
+                yield_q3 = gb[metric_key].quantile(0.75)
                 ax.fill_between(yield_avg.index, yield_q1, yield_q3, **kwargs["fill_kwargs"])
 
         ax.axhline(
@@ -185,7 +180,7 @@ def plot_yield(target_df, metrics, avg="mean", error="std"):
 
         ax.tick_params(axis="x", which="both", top=False)
 
-        ax.set_xlim(7e-4, 3)
+        # ax.set_xlim(7e-4, 1.2)
         ax.set_xscale("log")
         ax.set_xlabel(r"$f_{\mathrm{train}}$")
         ax.set_ylabel("Yield (TCM / calculation)")
@@ -194,23 +189,26 @@ def plot_yield(target_df, metrics, avg="mean", error="std"):
     return fig
 
 
-fig = plot_yield(TARGET_DF, METRICS_DFS, avg="median", error="iqr")
-fig.savefig("../plots/mc3d_tcm_yield.pdf")
+fig = plot_yield(TARGET_DF, METRICS_DFS, avg="mean", error="std")
+fig.savefig(f"../plots/mc3d_{TRAIN_TEST}_{CALCULATION_TYPE}_tcm_yield.pdf", bbox_inches="tight")
+plt.close(fig)
 
 
 # %%
-def plot_balanced_accuracy(target_df, metrics, avg="mean", error="std"):
-
+def plot_metric(target_df, metrics, metric_key, metric_name, avg="mean", error="std", ax=None):
     with plt.style.context("../sorep.mplstyle"):
-        fig, ax = plt.subplots(dpi=300)
+        if ax is None:
+            fig, ax = plt.subplots(dpi=300)
+        else:
+            fig = ax.get_figure()
 
         for feature_id, kwargs in FEATURE_KWARGS.items():
             gb = metrics[feature_id].groupby(by="train_size")
 
             if avg == "mean":
-                balanced_accuracy_avg = gb["balanced_accuracy"].mean()
+                balanced_accuracy_avg = gb[metric_key].mean()
             elif avg == "median":
-                balanced_accuracy_avg = gb["balanced_accuracy"].median()
+                balanced_accuracy_avg = gb[metric_key].median()
 
             ax.plot(
                 balanced_accuracy_avg.index,
@@ -220,8 +218,8 @@ def plot_balanced_accuracy(target_df, metrics, avg="mean", error="std"):
                 label=kwargs["shortname"],
             )
             if error == "minmax":
-                balanced_accuracy_min = gb["balanced_accuracy"].min()
-                balanced_accuracy_max = gb["balanced_accuracy"].max()
+                balanced_accuracy_min = gb[metric_key].min()
+                balanced_accuracy_max = gb[metric_key].max()
                 ax.fill_between(
                     balanced_accuracy_avg.index,
                     balanced_accuracy_min,
@@ -229,7 +227,7 @@ def plot_balanced_accuracy(target_df, metrics, avg="mean", error="std"):
                     **kwargs["fill_kwargs"],
                 )
             elif error == "std":
-                balanced_accuracy_std = gb["balanced_accuracy"].std()
+                balanced_accuracy_std = gb[metric_key].std()
                 ax.fill_between(
                     balanced_accuracy_avg.index,
                     balanced_accuracy_avg - balanced_accuracy_std,
@@ -237,8 +235,8 @@ def plot_balanced_accuracy(target_df, metrics, avg="mean", error="std"):
                     **kwargs["fill_kwargs"],
                 )
             elif error == "iqr":
-                balanced_accuracy_q1 = gb["balanced_accuracy"].quantile(0.25)
-                balanced_accuracy_q3 = gb["balanced_accuracy"].quantile(0.75)
+                balanced_accuracy_q1 = gb[metric_key].quantile(0.25)
+                balanced_accuracy_q3 = gb[metric_key].quantile(0.75)
                 ax.fill_between(
                     balanced_accuracy_avg.index,
                     balanced_accuracy_q1,
@@ -251,18 +249,41 @@ def plot_balanced_accuracy(target_df, metrics, avg="mean", error="std"):
         )
         top_sec_ax.set_xlabel(r"$N_{\mathrm{train}}$")
 
-        ax.axhline(0, c="grey", ls=":", lw=1, label="Random")
         ax.tick_params(axis="x", which="both", top=False)
         ax.set_xscale("log")
         ax.set_xlabel(r"$f_{\mathrm{train}}$")
-        ax.set_ylabel("Balanced accuracy")
+        ax.set_ylabel(metric_name)
         ax.legend(loc=[0, -0.35], ncols=3)
 
     return fig
 
 
-fig = plot_balanced_accuracy(TARGET_DF, METRICS_DFS)
-fig.savefig("../plots/mc3d_tcm_balanced_accuracy.pdf")
+for metric_key, metric_name in [
+    ("f1", r"$F_{1}$ score"),
+    ("balanced_accuracy", "Balanced accuracy"),
+    ("speedup", "Speedup"),
+    ("roc_auc_weighted", "ROC-AUC (weighted)"),
+    ("precision", "Precision"),
+    ("recall", "Recall"),
+]:
+    fig = plot_metric(TARGET_DF, METRICS_DFS, metric_key=metric_key, metric_name=metric_name, avg="mean", error="std")
+    fig.savefig(f"../plots/mc3d_{TRAIN_TEST}_{CALCULATION_TYPE}_tcm_{metric_key}.pdf", bbox_inches="tight")
+    plt.close(fig)
+
+# %%
+with plt.style.context("../sorep.mplstyle"):
+    fig, ax = plt.subplots(dpi=300)
+ax.plot(np.logspace(-3, 0, 100), np.logspace(-3, 0, 100), c="k", ls=":", lw=1, label="HT")
+fig = plot_metric(
+    TARGET_DF,
+    METRICS_DFS,
+    metric_key="f_found",
+    metric_name=r"$f_{\mathrm{TCM}}$ found",
+    avg="mean",
+    error="std",
+    ax=ax,
+)
+fig.savefig(f"../plots/mc3d_{TRAIN_TEST}_{CALCULATION_TYPE}_tcm_f_found.pdf", bbox_inches="tight")
 fig
 
 
@@ -311,18 +332,124 @@ def plot_feature_importances(target_df, metrics, train_size=0.5, axes=None, avg=
             if "xticks" in kwargs:
                 ax.set_xticks(kwargs["xticks"], kwargs["xtick_labels"], **kwargs.get("xticks_kwargs", {}))
             if i % 2 == 0:
-                ax.set_ylabel("Feature importance")
+                ax.set_ylabel("MDI feature importance")
             if i > 1:
                 ax.set_xlabel("Feature")
             ax.set_yticklabels([])
-            ax.legend()
+            ax.legend(frameon=True)
         fig.tight_layout()
 
     return fig
 
 
 fig = plot_feature_importances(TARGET_DF, METRICS_DFS, train_size=0.5, avg="mean", error=None)
-fig.savefig("../plots/mc3d_tcm_feature_importances.pdf", bbox_inches="tight")
+fig.savefig(f"../plots/mc3d_{CALCULATION_TYPE}_tcm_feature_importances.pdf", bbox_inches="tight")
+fig
+# %%
+import sorep
+
+
+def plot_example_feature_importance(id_, target_df, metrics, train_size=0.5, avg="mean", error="std"):
+    with h5py.File("../data/mc3d/materials.h5", "r") as f:
+        material = sorep.MaterialData.from_hdf(f[id_]["single_shot"])
+
+    targets = target_df[target_df.id == id_].iloc[0]
+
+    ef = material.bands.fermi_energy
+    energies = np.linspace(ef - 5, ef + 5, 4096)
+    dos = material.bands.compute_smeared_dos(energies, "gauss", 0.05).sum(axis=0)
+
+    with plt.style.context("../sorep.mplstyle"):
+        fig, ax = plt.subplots()
+        tax = ax.twinx()
+        ax.plot(energies - ef, dos, c="k", alpha=0.25, linestyle="-")
+        ax.fill_between(energies - ef, dos, 0, color="k", alpha=0.2)
+        # ax.set_title(
+        #     " | ".join(
+        #         [
+        #             sorep.prettify.latex_chemical_formula(material.atoms.info["formula_hill"]),
+        #             f"$E_g={targets['band_gap']:.2f}$ eV",
+        #             f"$m^*_e={targets['electron_effective_mass']:.2f}$",
+        #             f"$m^*_h={targets['hole_effective_mass']:.2f}$",
+        #         ]
+        #     )
+        # )
+
+        feature_metrics = metrics["vbm_centered/0"]
+        tax.plot(
+            FEATURE_KWARGS["vbm_centered/0"]["line_x"] + material.bands.vbm - ef,
+            np.array(
+                feature_metrics[feature_metrics.train_size == train_size]["impurity_feature_importances"].to_list()
+            ).mean(axis=0),
+            **FEATURE_KWARGS["vbm_centered/0"]["line_kwargs"],
+        )
+
+        feature_metrics = metrics["fermi_centered/0"]
+        tax.plot(
+            FEATURE_KWARGS["fermi_centered/0"]["line_x"] + material.bands.fermi_energy - ef,
+            np.array(
+                feature_metrics[feature_metrics.train_size == train_size]["impurity_feature_importances"].to_list()
+            ).mean(axis=0),
+            **FEATURE_KWARGS["fermi_centered/0"]["line_kwargs"],
+        )
+
+        feature_metrics = metrics["cbm_centered/0"]
+        tax.plot(
+            FEATURE_KWARGS["cbm_centered/0"]["line_x"] + material.bands.cbm - ef,
+            np.array(
+                feature_metrics[feature_metrics.train_size == train_size]["impurity_feature_importances"].to_list()
+            ).mean(axis=0),
+            **FEATURE_KWARGS["cbm_centered/0"]["line_kwargs"],
+        )
+
+        feature_metrics = metrics["vbm_fermi_cbm_concatenated/0"]
+        tax.plot(
+            np.linspace(-1, 1, 171) + material.bands.vbm - ef,
+            np.array(
+                feature_metrics[feature_metrics.train_size == train_size]["impurity_feature_importances"].to_list()
+            )[:, :171].mean(axis=0),
+            **FEATURE_KWARGS["vbm_fermi_cbm_concatenated/0"]["line_kwargs"],
+        )
+        tax.plot(
+            np.linspace(-1, 1, 171) + material.bands.fermi_energy - ef,
+            np.array(
+                feature_metrics[feature_metrics.train_size == train_size]["impurity_feature_importances"].to_list()
+            )[:, 171:342].mean(axis=0),
+            **FEATURE_KWARGS["vbm_fermi_cbm_concatenated/0"]["line_kwargs"],
+        )
+        tax.plot(
+            np.linspace(-1, 1, 171) + material.bands.cbm - ef,
+            np.array(
+                feature_metrics[feature_metrics.train_size == train_size]["impurity_feature_importances"].to_list()
+            )[:, 342:].mean(axis=0),
+            **FEATURE_KWARGS["vbm_fermi_cbm_concatenated/0"]["line_kwargs"],
+        )
+
+        ax.axvline(material.bands.vbm - ef + 0.5, c="k", ls=":", alpha=0.5, label=r"$E_{g}=0.5$")
+        ax.axvline(material.bands.fermi_energy - ef - 0.25, c="k", ls=":", alpha=0.5)
+        ax.axvline(material.bands.fermi_energy - ef + 0.25, c="k", ls=":", alpha=0.5)
+        ax.axvline(material.bands.cbm - ef - 0.5, c="k", ls=":", alpha=0.5)
+
+        ax.axvline(material.bands.vbm - ef, c="#aa0000", ls="-.", alpha=0.5, label=r"$E_{\mathrm{VBM}}$")
+        ax.axvline(material.bands.fermi_energy - ef, c="#008000", ls="-.", alpha=0.5, label=r"$E_{F}$")
+        ax.axvline(material.bands.cbm - ef, c="#000080", ls="-.", alpha=0.5, label=r"$E_{\mathrm{CBM}}$")
+
+        ax.set_yticklabels([])
+        ax.set_ylabel(r"$\mathrm{DOS}(E) (arb. u.)$")
+
+        ax.set_xticks([-4, material.bands.vbm - ef, -2, 0, 2, material.bands.cbm - ef, 4])
+        ax.set_xticklabels([-4, r"$E_{\mathrm{VBM}}$", -2, r"$E_{F}$", 2, r"$E_{\mathrm{CBM}}$", 4])
+
+        tax.set_yticklabels([])
+        tax.set_ylabel("MDI feature importance")
+
+        fig.legend(loc="upper center", ncol=5)
+
+    return fig
+
+
+fig = plot_example_feature_importance("mc3d-21923", TARGET_DF, METRICS_DFS, train_size=0.5)
+fig.savefig("../plots/mc3d_tcm_feature_importances_example.pdf")
 fig
 # %%
 kwargs = {
@@ -406,6 +533,7 @@ def plot_confusion_matrix(feature_label, train_size):
 
 
 fig = plot_confusion_matrix("vbm_centered/0", 0.01)
+fig
 # %%
 train_size = 0.01
 cm_data = []
@@ -475,4 +603,3 @@ for ax in axes:
     ax.set_xticks(FEATURE_KWARGS[FEATURE_ID]["xticks"])
     ax.set_xticklabels(FEATURE_KWARGS[FEATURE_ID]["xtick_labels"])
     ax.legend()
-# %%

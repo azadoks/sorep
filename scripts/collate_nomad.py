@@ -44,6 +44,7 @@ for xyz_path in pl.Path("../data/nomad2018tcm/").glob("**/geometry.xyz"):
         images_train.append(atoms)
     else:
         images_test.append(atoms)
+# %%
 write_extxyz("../data/nomad2018tcm_structures_train.xyz", images_train)
 write_extxyz("../data/nomad2018tcm_structures_test.xyz", images_test)
 # %%

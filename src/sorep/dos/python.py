@@ -16,7 +16,7 @@ def smeared_dos(  # pylint: disable=too-many-arguments
     weights: npt.ArrayLike,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
-    max_exponent: float = 200.0,
+    max_exponent: float = 36.0,
 ) -> npt.ArrayLike:
     """Compute a smeared density of states.
 
@@ -26,6 +26,7 @@ def smeared_dos(  # pylint: disable=too-many-arguments
         weights (npt.ArrayLike): (n_kpoints,) array of k-point weights
         smearing_type (ty.Union[str,int]): type of smearing (see `smearing_from_name`)
         smearing_width (float): smearing width
+        max_exponent (float, optional): maximum argument to `exp` in the smearing function. Defaults to 36.0 (Z=6.0).
 
     Returns:
         npt.NDArray: (n_spins, n_energies) array containing the DOS for each spin channel

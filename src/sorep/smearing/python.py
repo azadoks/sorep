@@ -15,7 +15,7 @@ __all__ = (
     "smearing_from_name",
 )
 
-from .cython import ufuncs
+from .cython import ufuncs  # pylint: disable=import-error
 
 
 class Smearing(ABC):
@@ -76,6 +76,9 @@ class Smearing(ABC):
 
 class Delta(Smearing):
     """No smearing, i.e. a true step/delta function."""
+
+    def _scale(self, x: float) -> float:
+        return x - self.center
 
     def occupation(self, x: npt.ArrayLike, max_exponent: ty.Optional[float] = None) -> npt.ArrayLike:
         x = self._scale(x)
@@ -147,9 +150,9 @@ def smearing_from_name(name: ty.Optional[ty.Union[str, int]]) -> Smearing:
         name = str(name)
     if isinstance(name, str):
         name = name.lower()
-    if name is None or name == "fixed":
+    if name is None or name in ("fixed", "delta"):
         smearing = Delta
-    if name in ("mv", "m-v", "marzari-vanderbilt", "cold", "-1"):
+    elif name in ("mv", "m-v", "marzari-vanderbilt", "cold", "-1"):
         smearing = Cold
     elif name in ("gauss", "gaussian", "0"):
         smearing = Gaussian

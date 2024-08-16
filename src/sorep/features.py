@@ -19,6 +19,7 @@ def _dos_featurize(  # pylint: disable=too-many-arguments
     n_energies: int,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
+    **kwargs,
 ) -> npt.ArrayLike:
     """Compute DOS features for a given band structure.
 
@@ -37,7 +38,9 @@ def _dos_featurize(  # pylint: disable=too-many-arguments
         npt.ArrayLike: DOS features.
     """
     energies = np.linspace(center + e_min, center + e_max, n_energies)
-    dos = bands.compute_smeared_dos(energies=energies, smearing_type=smearing_type, smearing_width=smearing_width)
+    dos = bands.compute_smeared_dos(
+        energies=energies, smearing_type=smearing_type, smearing_width=smearing_width, **kwargs
+    )
     return dos.sum(axis=0)  # Total dos
 
 
@@ -48,6 +51,7 @@ def fermi_centered(  # pylint: disable=too-many-arguments
     n_energies: int,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
+    **kwargs,
 ) -> npt.ArrayLike:
     """Compute DOS features centered around the Fermi energy.
 
@@ -64,7 +68,7 @@ def fermi_centered(  # pylint: disable=too-many-arguments
         npt.ArrayLike: DOS features.
     """
     return _dos_featurize(
-        material.bands, material.bands.fermi_energy, e_min, e_max, n_energies, smearing_type, smearing_width
+        material.bands, material.bands.fermi_energy, e_min, e_max, n_energies, smearing_type, smearing_width, **kwargs
     )
 
 
@@ -75,6 +79,7 @@ def vbm_centered(  # pylint: disable=too-many-arguments
     n_energies: int,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
+    **kwargs,
 ) -> npt.ArrayLike:
     """Compute DOS features centered around the valence band maximum (VBM).
     For metals, the Fermi energy is used as the center.
@@ -91,7 +96,9 @@ def vbm_centered(  # pylint: disable=too-many-arguments
     Returns:
         npt.ArrayLike: DOS features.
     """
-    return _dos_featurize(material.bands, material.bands.vbm, e_min, e_max, n_energies, smearing_type, smearing_width)
+    return _dos_featurize(
+        material.bands, material.bands.vbm, e_min, e_max, n_energies, smearing_type, smearing_width, **kwargs
+    )
 
 
 def cbm_centered(  # pylint: disable=too-many-arguments
@@ -101,6 +108,7 @@ def cbm_centered(  # pylint: disable=too-many-arguments
     n_energies: int,
     smearing_type: ty.Union[str, int],
     smearing_width: float,
+    **kwargs,
 ) -> npt.ArrayLike:
     """Compute DOS features centered around the conduction band minimum (CBM).
     For metals, the Fermi energy is used as the center.
@@ -115,7 +123,9 @@ def cbm_centered(  # pylint: disable=too-many-arguments
     Returns:
         npt.ArrayLike: DOS features.
     """
-    return _dos_featurize(material.bands, material.bands.cbm, e_min, e_max, n_energies, smearing_type, smearing_width)
+    return _dos_featurize(
+        material.bands, material.bands.cbm, e_min, e_max, n_energies, smearing_type, smearing_width, **kwargs
+    )
 
 
 def vbm_cbm_concatenated(
