@@ -174,7 +174,7 @@ def plot_yield(target_df, metrics, avg="mean", error="std"):
         )
 
         top_sec_ax = ax.secondary_xaxis(
-            "top", functions=(lambda x: x * 0.9 * target_df.shape[0], lambda x: x / 0.9 / target_df.shape[0])
+            "top", functions=(lambda x: x * 0.9 * N_MATERIALS, lambda x: x / 0.9 / N_MATERIALS)
         )
         top_sec_ax.set_xlabel(r"$N_{\mathrm{train}}$")
 
@@ -245,7 +245,7 @@ def plot_metric(target_df, metrics, metric_key, metric_name, avg="mean", error="
                 )
 
         top_sec_ax = ax.secondary_xaxis(
-            "top", functions=(lambda x: x * 0.9 * target_df.shape[0], lambda x: x / 0.9 / target_df.shape[0])
+            "top", functions=(lambda x: x * 0.9 * N_MATERIALS, lambda x: x / 0.9 / N_MATERIALS)
         )
         top_sec_ax.set_xlabel(r"$N_{\mathrm{train}}$")
 
