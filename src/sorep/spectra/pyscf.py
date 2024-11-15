@@ -119,7 +119,7 @@ def compute_one_electron_spectrum(  # pylint: disable=too-many-arguments,too-man
     atoms: Atoms,
     basis: str,
     operator: str = "int1e_kin",
-    kdensity: float = 0.15,
+    kdensity: ty.Optional[float] = None,
     kgrid_shape: ty.Optional[ty.Sequence[int]] = None,
     eigen_solver: str = "eigh",
     use_symmetries: bool = True,
@@ -154,7 +154,10 @@ def compute_one_electron_spectrum(  # pylint: disable=too-many-arguments,too-man
     if eigen_solver not in SUPPORTED_EIGEN_SOLVERS:
         raise ValueError(f"Unsupported `eigen_solver` {eigen_solver}.")
     # Convert kdensity to 1/Bohr
-    kdensity_bohr: float = kdensity / ANGSTROM_TO_BOHR
+    if kdensity is not None:
+        kdensity_bohr: float = kdensity / ANGSTROM_TO_BOHR
+    else:
+        kdensity_bohr = None
     cell: Cell = _build_cell(atoms, basis)
     kpoints_cart, kpoints_frac, weights, n_kpoints = _build_kpoints(cell, kdensity_bohr, kgrid_shape, use_symmetries)
     # Allocate the bands array
